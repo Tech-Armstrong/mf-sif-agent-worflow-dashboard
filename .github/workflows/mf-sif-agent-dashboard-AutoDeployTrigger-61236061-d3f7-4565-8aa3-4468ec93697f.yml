@@ -1,0 +1,49 @@
+name: Trigger auto deployment for mf-sif-agent-dashboard
+
+# When this action will be executed
+on:
+  # Automatically trigger it when detected changes in repo
+  push:
+    branches: 
+      [ main ]
+    paths:
+    - '**'
+    - '.github/workflows/mf-sif-agent-dashboard-AutoDeployTrigger-61236061-d3f7-4565-8aa3-4468ec93697f.yml'
+
+  # Allow manual trigger 
+  workflow_dispatch:      
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions: 
+      id-token: write #This is required for requesting the OIDC JWT Token
+      contents: read #Required when GH token is used to authenticate with private repo
+
+    steps:
+      - name: Checkout to the branch
+        uses: actions/checkout@v2
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.MFSIFAGENTDASHBOARD_AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.MFSIFAGENTDASHBOARD_AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.MFSIFAGENTDASHBOARD_AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build and push container image to registry
+        uses: azure/container-apps-deploy-action@v2
+        with:
+          appSourcePath: ${{ github.workspace }}
+          _dockerfilePathKey_: _dockerfilePath_
+          _targetLabelKey_: _targetLabel_
+          registryUrl: mfsifagentdashboard.azurecr.io
+          registryUsername: ${{ secrets.MFSIFAGENTDASHBOARD_REGISTRY_USERNAME }}
+          registryPassword: ${{ secrets.MFSIFAGENTDASHBOARD_REGISTRY_PASSWORD }}
+          containerAppName: mf-sif-agent-dashboard
+          resourceGroup: MF-SIF-DATA-EXTRACTION
+          imageToBuild: mfsifagentdashboard.azurecr.io/mf-sif-agent-dashboard:${{ github.sha }}
+          _buildArgumentsKey_: |
+            _buildArgumentsValues_
+
+
