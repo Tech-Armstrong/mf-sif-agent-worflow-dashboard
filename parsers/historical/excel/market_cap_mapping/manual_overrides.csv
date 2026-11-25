@@ -1,0 +1,9 @@
+company_name,isin,symbol,market_cap_category,note
+ALLCARGO GLOBAL LTD.,INE1YPB01014,AGL,,Demerged from Allcargo Logistics (INE418H01029) Nov 2025; listed NSE/BSE 3 Jul 2026; ISIN as printed by Tata from Jun 2026
+TALWANDI SABO POWER LTD,INE694L01019,,,Printed without an ISIN or with placeholder DU2205A01025; ISIN as printed by Kotak from Jun 2026
+MALCO ENERGY LTD,INE704J01044,,,Printed without an ISIN or with placeholders DU3205A01025 / INDUMMY30046; AMFI lists this ISIN as Vedanta Oil and Gas (VOGL)
+GSPL TRANSMISSION LTD,INE1TUG01013,,,Sundaram Jul-Aug 2026 printed no ISIN; ISIN as printed by Kotak
+DEE DEVELOPMENT ENGINEEERS LTD,INE841L01016,,,Kotak's spelling; second lot printed with placeholder DUMMYDDELPRE; AMFI ISIN of Dee Development Engineers; summed with the main line by merge_duplicate_isins
+MAGNASOUND (INDIA) PVT LTD,IDIA00028484,,,Unlisted; no real ISIN found; AMC code printed by ABSL and by DSP from Sep 2026
+MAGNASOUND (INDIA) LTD,IDIA00028484,,,Unlisted; no real ISIN found; DSP Jan-Jun 2026 spelling
+MAGNASOUND INDIA LTD,IDIA00028484,,,Unlisted; no real ISIN found; DSP Jul-Sep 2026 spelling

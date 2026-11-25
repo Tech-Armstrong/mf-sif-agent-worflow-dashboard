@@ -1,0 +1,53 @@
+name: Build and deploy the parse jobs
+
+# Builds the two Container Apps Job images in ACR (az acr build, no Docker on the runner) and points the jobs
+# at them. The jobs themselves (trigger, queue rule, secrets) are created once in the portal: see README.
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'parsers/**'
+      - 'jobs/**'
+      - 'pipeline/**'
+      - '.github/workflows/parse-jobs.yml'
+  workflow_dispatch:
+
+env:
+  REGISTRY: mfsifagentdashboard
+  RESOURCE_GROUP: MF-SIF-DATA-EXTRACTION
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - kind: portfolio
+            job: parse-portfolio
+          - kind: factsheet
+            job: parse-factsheet
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.MFSIFAGENTDASHBOARD_AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.MFSIFAGENTDASHBOARD_AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.MFSIFAGENTDASHBOARD_AZURE_SUBSCRIPTION_ID }}
+
+      - name: Build the image in ACR
+        run: |
+          az acr build --registry "$REGISTRY" --timeout 7200 \
+            --image "${{ matrix.job }}:${{ github.sha }}" --image "${{ matrix.job }}:latest" \
+            --file "jobs/${{ matrix.kind }}.Dockerfile" .
+
+      - name: Point the job at the new image
+        run: |
+          az config set extension.use_dynamic_install=yes_without_prompt
+          az containerapp job update --name "${{ matrix.job }}" --resource-group "$RESOURCE_GROUP" \
+            --image "$REGISTRY.azurecr.io/${{ matrix.job }}:${{ github.sha }}"

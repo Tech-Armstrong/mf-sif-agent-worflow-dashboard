@@ -1,0 +1,926 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Drive Upload Agent</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #fff; --ink: #1c2330; --muted: #6b7482; --line: #e2e5ea;
+    --accent: #1f5fd6; --accent-ink: #fff; --user: #e8f0fe; --warn-bg: #fff7e6; --warn-line: #f0c36d;
+    --ok: #1a7f37; --bad: #c62828;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b; --panel: #1b2029; --ink: #e6e9ef; --muted: #98a1b0; --line: #2c333f;
+      --accent: #5b8def; --accent-ink: #0b1020; --user: #1f2b44; --warn-bg: #2a2416; --warn-line: #7a5c1e;
+      --ok: #4cc06b; --bad: #ef6b6b;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 15px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--ink); }
+  header { padding: 14px 20px; border-bottom: 1px solid var(--line); background: var(--panel); display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+  header h1 { font-size: 17px; margin: 0; }
+  header small { color: var(--muted); }
+  main { display: grid; grid-template-columns: 320px 1fr; gap: 16px; padding: 16px; height: calc(100vh - 58px); }
+  @media (max-width: 800px) { main { grid-template-columns: 1fr; height: auto; } #chat { min-height: 70vh; } }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; display: flex; flex-direction: column; min-height: 0; }
+  .panel h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); margin: 0; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  #drop { margin: 14px; border: 2px dashed var(--line); border-radius: 10px; padding: 22px 12px; text-align: center; color: var(--muted); cursor: pointer; transition: .15s; }
+  #drop.over { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+  #drop b { color: var(--ink); }
+  #files { list-style: none; margin: 0; padding: 0 14px 14px; overflow: auto; flex: 1; }
+  #files li { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; }
+  #files .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #files .size { color: var(--muted); font-size: 12px; }
+  .x { border: 0; background: none; color: var(--muted); cursor: pointer; font-size: 16px; padding: 0 4px; }
+  .x:hover { color: var(--bad); }
+  .quick { padding: 0 14px 14px; display: flex; flex-direction: column; gap: 6px; }
+  .quick button { text-align: left; }
+  #chat .log { flex: 1; overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 80%; padding: 10px 13px; border-radius: 10px; white-space: pre-wrap; word-wrap: break-word; }
+  .msg.user { align-self: flex-end; background: var(--user); }
+  .msg.agent { align-self: flex-start; border: 1px solid var(--line); }
+  .msg.sys { align-self: center; color: var(--muted); font-size: 13px; }
+  .msg.err { align-self: center; color: var(--bad); font-size: 13px; }
+  .approval { align-self: stretch; background: var(--warn-bg); border: 1px solid var(--warn-line); border-radius: 10px; padding: 12px 14px; }
+  .approval pre { background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px; font-size: 12px; overflow: auto; max-height: 220px; margin: 6px 0; }
+  .approval .row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  .approval input { flex: 1; min-width: 160px; }
+  form.compose { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--line); }
+  input[type=text], textarea { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 9px 11px; }
+  textarea { flex: 1; resize: none; height: 44px; }
+  button { font: inherit; border-radius: 8px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 8px 14px; cursor: pointer; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button.ok { background: var(--ok); color: #fff; border-color: var(--ok); }
+  button:disabled { opacity: .5; cursor: default; }
+  #left { overflow: auto; }
+  .settings { padding: 12px 14px 4px; display: grid; gap: 10px; }
+  .settings label.f { display: grid; gap: 4px; font-size: 12px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .03em; }
+  .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  select, .ms-btn { font: inherit; font-size: 14px; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; width: 100%; text-transform: none; letter-spacing: 0; font-weight: 400; }
+  .seg { display: grid; grid-template-columns: 1fr 1fr; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; padding: 8px 6px; font-size: 13px; background: var(--bg); text-transform: none; letter-spacing: 0; font-weight: 500; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button.on { background: var(--accent); color: var(--accent-ink); }
+  .ms { position: relative; }
+  .ms-btn { text-align: left; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+  .ms-btn::after { content: "▾"; color: var(--muted); }
+  .ms-pop { position: absolute; z-index: 10; left: 0; right: 0; top: calc(100% + 4px); background: var(--panel); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 8px 24px rgb(0 0 0 / .15); display: none; }
+  .ms.open .ms-pop { display: block; }
+  .ms-pop input[type=search] { width: calc(100% - 16px); margin: 8px; font: inherit; font-size: 14px; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+  .ms-acts { display: flex; gap: 6px; padding: 0 8px 6px; }
+  .ms-acts button { padding: 3px 10px; font-size: 12px; }
+  .ms-list { max-height: 260px; overflow: auto; padding: 0 4px 6px; }
+  .ms-list label { display: flex; gap: 8px; align-items: center; padding: 5px 6px; border-radius: 6px; cursor: pointer; font-size: 14px; color: var(--ink); text-transform: none; letter-spacing: 0; font-weight: 400; }
+  .ms-list label:hover { background: var(--bg); }
+  .chips { display: flex; flex-wrap: wrap; gap: 4px; }
+  .chip { background: var(--user); border-radius: 999px; padding: 2px 4px 2px 9px; font-size: 12px; display: inline-flex; align-items: center; gap: 2px; }
+  .chip button { border: 0; background: none; padding: 0 4px; font-size: 13px; color: var(--muted); }
+  .hint { font-size: 12px; color: var(--muted); margin: 0; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 2px 10px; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin: 6px 0; font-size: 13px; }
+  .kv dt { color: var(--muted); } .kv dd { margin: 0; word-break: break-word; }
+  .kv dd.warn { color: var(--bad); }
+  :root { --good: #0ca30c; --critical: #d03b3b; --na: #b9b8b0; --grid: #e1e0d9; }
+  @media (prefers-color-scheme: dark) { :root { --na: #4a4a46; --grid: #2c2c2a; } }
+  [hidden] { display: none !important; }
+  .side-head { display: flex; justify-content: space-between; align-items: center; }
+  .side-btn { border: 1px solid var(--line); background: var(--panel); color: var(--muted); padding: 0 8px; height: 26px; font-size: 15px; line-height: 1; border-radius: 6px; }
+  .side-btn:hover { color: var(--ink); border-color: var(--muted); }
+  .rail { display: none; }
+  #view-upload.collapsed { grid-template-columns: 46px 1fr; }
+  #view-upload.collapsed #left > :not(.rail) { display: none; }
+  #view-upload.collapsed .rail { display: flex; flex-direction: column; align-items: center; gap: 12px; padding: 10px 0; height: 100%; cursor: pointer; }
+  .rail-txt { writing-mode: vertical-rl; transform: rotate(180deg); font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; }
+  @media (max-width: 800px) {
+    #view-upload.collapsed { grid-template-columns: 1fr; }
+    #view-upload.collapsed .rail { flex-direction: row; padding: 8px 10px; height: auto; }
+    .rail-txt { writing-mode: horizontal-tb; transform: none; }
+  }
+  .tabs { display: flex; gap: 2px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 2px; }
+  .tabs button { border: 0; padding: 5px 14px; font-size: 14px; background: none; border-radius: 6px; }
+  .tabs button.on { background: var(--panel); box-shadow: 0 1px 2px rgb(0 0 0 / .12); font-weight: 600; }
+  main.cov { display: block; height: auto; }
+  .cov-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .cov-bar .seg { min-width: 300px; }
+  .cov-bar .seg.fund { min-width: 120px; }
+  .cov-bar select { width: auto; }
+  .tog { display: flex; gap: 6px; align-items: center; font-size: 14px; color: var(--muted); margin-left: auto; }
+  #cov-body { padding: 14px; }
+  .banner { padding: 10px 12px; border-radius: 8px; background: var(--warn-bg); border: 1px solid var(--warn-line); margin-bottom: 12px; font-size: 14px; }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .tile { border: 1px solid var(--line); border-radius: 10px; padding: 10px 14px; }
+  .tile .k { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; font-weight: 600; }
+  .tile .v { font-size: 26px; font-weight: 650; font-variant-numeric: tabular-nums; }
+  .tile .v small { font-size: 14px; color: var(--muted); font-weight: 400; }
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 13px; color: var(--muted); margin-bottom: 10px; align-items: center; }
+  .legend span { display: inline-flex; gap: 6px; align-items: center; }
+  .mk { width: 22px; height: 22px; border-radius: 5px; display: inline-grid; place-items: center; font-size: 13px; font-weight: 700; line-height: 1; }
+  .mk.up { background: var(--good); color: #fff; }
+  .mk.miss { background: var(--critical); color: #fff; }
+  .mk.na { color: var(--na); font-weight: 400; }
+  .tbl-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 10px; }
+  table.cov-t { border-collapse: collapse; width: 100%; font-size: 13px; }
+  .cov-t th, .cov-t td { padding: 5px 6px; border-bottom: 1px solid var(--grid); text-align: center; }
+  .cov-t thead th { font-weight: 600; color: var(--muted); font-size: 12px; vertical-align: bottom; white-space: nowrap; position: sticky; top: 0; background: var(--panel); }
+  .cov-t th.amc, .cov-t td.amc { text-align: left; white-space: nowrap; padding-left: 12px; }
+  .cov-t td.amc small { display: block; color: var(--critical); font-size: 11px; }
+  .cov-t tr:last-child td { border-bottom: 0; }
+  .cov-t tbody tr:hover { background: var(--bg); }
+  .cov-t td.done { text-align: right; padding-right: 12px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .bar { display: inline-block; vertical-align: middle; width: 56px; height: 6px; border-radius: 3px; background: var(--grid); margin-left: 8px; overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--good); border-radius: 3px; }
+  .fs-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 8px; }
+  .fs { display: flex; gap: 10px; align-items: center; border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+  .fs .t { min-width: 0; } .fs .t b { font-weight: 500; display: block; }
+  .fs .t small { color: var(--muted); font-size: 12px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .note { font-size: 13px; color: var(--muted); margin-top: 12px; }
+  #tip { position: fixed; z-index: 50; pointer-events: none; background: var(--ink); color: var(--panel); font-size: 12px; padding: 6px 9px; border-radius: 6px; max-width: 320px; display: none; white-space: pre-line; }
+  .pz { display: grid; grid-template-columns: minmax(280px, 380px) 1fr; gap: 14px; padding: 14px; align-items: start; }
+  @media (max-width: 800px) { .pz { grid-template-columns: 1fr; } }
+  .pz-list { display: flex; flex-direction: column; gap: 8px; }
+  .pz-list h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); margin: 8px 0 0; }
+  .pf { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: grid; gap: 4px; }
+  .pf.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .pf .top { display: flex; gap: 8px; align-items: center; }
+  .pf .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+  .pf small { color: var(--muted); font-size: 12px; }
+  .pf small.err { color: var(--bad); }
+  .pf .acts { display: flex; gap: 6px; }
+  .pf .acts button { padding: 3px 10px; font-size: 12px; }
+  .st { font-size: 11px; font-weight: 600; border-radius: 999px; padding: 1px 8px; white-space: nowrap; border: 1px solid var(--line); color: var(--muted); }
+  .st.done { background: var(--good); border-color: var(--good); color: #fff; }
+  .st.failed { background: var(--critical); border-color: var(--critical); color: #fff; }
+  .pz-view { min-width: 0; }
+  .pz-view h3 { font-size: 15px; margin: 0 0 2px; word-break: break-word; }
+  .pz-head { display: flex; gap: 8px; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; margin-bottom: 12px; }
+  .pz-head .acts { display: flex; gap: 6px; }
+  .pz-head a { font-size: 14px; border: 1px solid var(--line); border-radius: 8px; padding: 6px 12px; color: var(--ink); text-decoration: none; }
+  .fund-h { font-size: 14px; margin: 16px 0 6px; } .fund-h small { color: var(--muted); font-weight: 400; }
+  details.fund > summary.fund-h { cursor: pointer; list-style: none; display: flex; gap: 6px; align-items: baseline; }
+  details.fund > summary.fund-h::-webkit-details-marker { display: none; }
+  details.fund > summary.fund-h::before { content: "▸"; color: var(--muted); transition: transform .15s; display: inline-block; }
+  details.fund[open] > summary.fund-h::before { transform: rotate(90deg); }
+  table.h-t { border-collapse: collapse; width: 100%; font-size: 13px; }
+  .h-t th, .h-t td { padding: 5px 8px; border-bottom: 1px solid var(--grid); text-align: left; vertical-align: top; }
+  .h-t thead th { font-weight: 600; color: var(--muted); font-size: 12px; position: sticky; top: 0; background: var(--panel); white-space: nowrap; }
+  .h-t td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .h-t tbody tr:hover { background: var(--bg); }
+  .h-wrap.mini { max-height: none; }
+  .pf .fsl { display: block; margin-top: 2px; }
+  .pf .acts[hidden] { display: none; }
+  .pz-head .seg.pz-mode { grid-template-columns: 1fr 1fr; min-width: 150px; }
+  .pz-head .seg.pz-mode button { padding: 6px 14px; }
+  #pz-table[hidden] { display: none; }
+  #pz-src[hidden] { display: none; }
+  .sheet-tabs { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-bottom: 8px; }
+  .sheet-tabs button { padding: 4px 10px; font-size: 12px; }
+  .sheet-tabs button.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .sheet-tabs a { margin-left: auto; font-size: 13px; }
+  .h-wrap.xl { max-height: 75vh; }
+  table.xl-t td { white-space: nowrap; max-width: 380px; overflow: hidden; text-overflow: ellipsis; }
+  table.xl-t th { position: sticky; left: 0; background: var(--bg); color: var(--muted); font-weight: 400; text-align: right; }
+  iframe.pdf { width: 100%; height: 80vh; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+  .pf .ask span { font-size: 13px; color: var(--muted); align-self: center; }
+  .h-wrap { max-height: 60vh; overflow: auto; border: 1px solid var(--line); border-radius: 10px; }
+  pre.json { background: var(--bg); border: 1px solid var(--line); border-radius: 8px; padding: 10px; font-size: 12px; overflow: auto; max-height: 65vh; margin: 0; }
+  .dots::after { content: "…"; animation: blink 1s infinite; }
+  @keyframes blink { 50% { opacity: .2; } }
+</style>
+</head>
+<body>
+<header>
+  <div style="display:flex;align-items:center;gap:18px">
+    <h1>Drive Upload Agent</h1>
+    <nav class="tabs"><button class="on" data-view="upload">Upload</button><button data-view="coverage">Coverage</button><button data-view="parsed">Parsed</button></nav>
+  </div>
+  <small id="who"></small>
+</header>
+<main id="view-coverage" class="cov" hidden>
+  <section class="panel">
+    <div class="cov-bar">
+      <div class="seg fund" id="cov-funds"></div>
+      <div class="seg" id="cov-types"></div>
+      <select id="cov-year" aria-label="Year"></select>
+      <select id="cov-month" aria-label="Month"></select>
+      <label class="tog"><input type="checkbox" id="cov-gaps"> Only <span id="cov-gaps-l">AMCs</span> with gaps</label>
+      <button type="button" id="cov-refresh" title="Re-read Drive (ignores the 5-minute cache)">Refresh</button>
+    </div>
+    <div id="cov-body"></div>
+  </section>
+  <div id="tip" role="tooltip"></div>
+</main>
+<main id="view-parsed" class="cov" hidden>
+  <section class="panel">
+    <div class="cov-bar">
+      <div class="seg fund" id="pz-funds"></div>
+      <select id="pz-year" aria-label="Year"></select>
+      <select id="pz-month" aria-label="Month"></select>
+      <button type="button" id="pz-refresh" style="margin-left:auto">Refresh</button>
+    </div>
+    <div class="pz">
+      <div class="pz-list" id="pz-list"></div>
+      <div class="pz-view" id="pz-view"></div>
+    </div>
+  </section>
+</main>
+<main id="view-upload">
+  <section class="panel" id="left">
+    <div class="rail">
+      <button type="button" class="side-btn" id="expand" title="Show sidebar" aria-label="Show sidebar" aria-expanded="false">»</button>
+      <span class="rail-txt" id="rail-txt"></span>
+    </div>
+    <h2 class="side-head">Drive destination
+      <button type="button" class="side-btn" id="collapse" title="Hide sidebar" aria-label="Hide sidebar" aria-expanded="true">«</button>
+    </h2>
+    <div class="settings">
+      <label class="f">Fund
+        <div class="seg" id="funds"></div>
+      </label>
+      <label class="f">Type
+        <div class="seg" id="types"></div>
+      </label>
+      <div class="f" style="display:grid;gap:4px;font-size:12px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.03em"><span id="amc-label">AMC</span>
+        <div class="ms" id="amc">
+          <button type="button" class="ms-btn" id="amc-btn">Select AMCs</button>
+          <div class="ms-pop">
+            <input type="search" id="amc-q" placeholder="Search…">
+            <div class="ms-acts"><button type="button" id="amc-all">Select all</button><button type="button" id="amc-none">Clear</button></div>
+            <div class="ms-list" id="amc-list"></div>
+          </div>
+        </div>
+      </div>
+      <div class="chips" id="amc-chips"></div>
+      <div class="row2">
+        <label class="f">Year <select id="year"></select></label>
+        <label class="f">Month <select id="month"></select></label>
+      </div>
+      <p class="hint" id="dest-hint"></p>
+    </div>
+    <h2>Your files</h2>
+    <label id="drop"><b>Drop files here</b><br>or click to choose<br><small>PDF, Excel, Word, CSV, text · max 100 MB each</small>
+      <input id="picker" type="file" multiple hidden>
+    </label>
+    <ul id="files"></ul>
+    <div class="quick">
+      <button data-q="Upload my files to Google Drive using the selected type, AMCs/SIFs, year and month.">Upload to Drive</button>
+    </div>
+  </section>
+  <section class="panel" id="chat">
+    <h2>Chat</h2>
+    <div class="log" id="log"><div class="msg sys">Upload files on the left, then ask the agent to read them or save them to Google Drive. Drive uploads wait for your approval.</div></div>
+    <form class="compose" id="compose">
+      <textarea id="text" placeholder="e.g. Check the files, then upload them to Drive"></textarea>
+      <button class="primary" id="send">Send</button>
+    </form>
+  </section>
+</main>
+<script>
+const $ = s => document.querySelector(s);
+let thread = null, busy = false;
+try { thread = sessionStorage.getItem("thread"); } catch {}
+
+async function api(path, opts = {}) {
+  const r = await fetch(path, opts);
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.detail || `${r.status} ${r.statusText}`);
+  return body;
+}
+function add(cls, text) {
+  const d = document.createElement("div");
+  d.className = "msg " + cls; d.textContent = text;
+  $("#log").appendChild(d); d.scrollIntoView({ block: "end" });
+  return d;
+}
+function setBusy(b) {
+  busy = b;
+  document.querySelectorAll("#send, .quick button").forEach(x => x.disabled = b);
+}
+const kb = n => n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(0) + " KB" : (n / 1048576).toFixed(1) + " MB";
+
+function renderFiles(files) {
+  const ul = $("#files"); ul.innerHTML = "";
+  if (!files.length) { ul.innerHTML = '<li style="justify-content:center;color:var(--muted)">No files yet</li>'; return; }
+  for (const f of files) {
+    const li = document.createElement("li");
+    li.innerHTML = `<span class="name"></span><span class="size">${kb(f.size_bytes)}</span><button class="x" title="Remove">×</button>`;
+    li.querySelector(".name").textContent = f.name; li.querySelector(".name").title = f.name;
+    li.querySelector(".x").onclick = async () => {
+      const r = await api(`/api/files?thread_id=${thread}&file_id=${encodeURIComponent(f.file_id)}`, { method: "DELETE" });
+      renderFiles(r.files);
+    };
+    ul.appendChild(li);
+  }
+}
+
+async function uploadFiles(list) {
+  if (!list.length) return;
+  const fd = new FormData(); fd.append("thread_id", thread);
+  for (const f of list) fd.append("files", f);
+  const note = add("sys dots", `Uploading ${list.length} file(s)`);
+  try {
+    const r = await api("/api/upload", { method: "POST", body: fd });
+    note.classList.remove("dots");
+    note.textContent = r.saved.length ? `Added: ${r.saved.map(f => f.name).join(", ")}` : "No files added";
+    r.errors.forEach(e => add("err", e));
+    renderFiles(r.files);
+  } catch (e) { note.remove(); add("err", "Upload failed: " + e.message); }
+}
+
+function handle(r) {
+  if (r.status === "approval") return showApproval(r.actions);
+  add("agent", r.reply || "(no reply)");
+  setBusy(false);
+}
+
+function showApproval(actions) {
+  const box = document.createElement("div"); box.className = "approval";
+  box.innerHTML = "<b>Approval needed</b> — the agent wants to:";
+  for (const a of actions) {
+    const t = document.createElement("div"); t.style.marginTop = "6px";
+    t.innerHTML = "<code></code>"; t.firstChild.textContent = a.tool;
+    if (a.tool === "Upload to Drive") {
+      const dl = document.createElement("dl"); dl.className = "kv";
+      for (const [k, v] of Object.entries(a.arguments)) {
+        const dt = document.createElement("dt"), dd = document.createElement("dd");
+        dt.textContent = k; dd.textContent = v; if (k === "warning") dd.className = "warn";
+        dl.append(dt, dd);
+      }
+      box.append(dl); continue;
+    }
+    const pre = document.createElement("pre"); pre.textContent = JSON.stringify(a.arguments, null, 2);
+    box.append(t, pre);
+  }
+  const row = document.createElement("div"); row.className = "row";
+  row.innerHTML = '<button class="ok">Approve</button><input type="text" placeholder="Or say what to change…"><button>Decline</button>';
+  box.appendChild(row); $("#log").appendChild(box); box.scrollIntoView({ block: "end" });
+  const [yes, fb, no] = row.children;
+  const decide = async approve => {
+    row.querySelectorAll("button,input").forEach(x => x.disabled = true);
+    box.insertAdjacentHTML("beforeend", `<div style="margin-top:6px;color:var(--muted)">${approve ? "Approved" : "Declined"}</div>`);
+    const wait = add("sys dots", approve ? "Running" : "Telling the agent");
+    try { const r = await api("/api/approve", { method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ thread_id: thread, approve, feedback: fb.value }) });
+          wait.remove(); handle(r); }
+    catch (e) { wait.remove(); add("err", e.message); setBusy(false); }
+  };
+  yes.onclick = () => decide(true); no.onclick = () => decide(false);
+}
+
+async function send(text) {
+  text = text.trim(); if (!text || busy) return;
+  setBusy(true); add("user", text); $("#text").value = "";
+  const wait = add("sys dots", "Thinking");
+  try { const r = await api("/api/chat", { method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ thread_id: thread, message: text, settings: currentSettings() }) });
+        wait.remove(); handle(r); }
+  catch (e) { wait.remove(); add("err", "Error: " + e.message); setBusy(false); }
+}
+
+$("#compose").onsubmit = e => { e.preventDefault(); send($("#text").value); };
+$("#text").onkeydown = e => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send($("#text").value); } };
+document.querySelectorAll(".quick button").forEach(b => b.onclick = () => send(b.dataset.q));
+$("#picker").onchange = e => { uploadFiles([...e.target.files]); e.target.value = ""; };
+const drop = $("#drop");
+["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", e => uploadFiles([...e.dataTransfer.files]));
+
+// ---------- destination settings ----------
+const sel = { doc_type: "", amcs: new Set() };
+let OPTS = null;
+const save = () => { try { localStorage.setItem("dest", JSON.stringify({ doc_type: sel.doc_type, amcs: [...sel.amcs] })); } catch {} };
+// Types are a Fund (MF / SIF) x Kind (Portfolio / Factsheet) grid; each AMC/SIF list belongs to its fund.
+const KIND_LABEL = { Portfolio: "Monthly Portfolio", Factsheet: "Factsheet" };
+const TI = t => OPTS.types[t];
+const typeOf = (fund, kind) => OPTS.doc_types.find(t => TI(t).fund === fund && TI(t).kind === kind);
+const pool = () => TI(sel.doc_type).managers;           // AMCs or SIFs for the current type
+const picked = () => pool().filter(a => sel.amcs.has(a)); // selections kept per fund, shown for the current one
+const mlabel = () => TI(sel.doc_type).manager_label;     // "AMC" or "SIF"
+const shortName = a => a.replace(/ Mutual Fund$/, "");
+function segButtons(el, items, current, label, onPick) {
+  el.innerHTML = "";
+  for (const v of items) {
+    const b = document.createElement("button"); b.type = "button"; b.textContent = label(v);
+    b.className = v === current ? "on" : ""; b.onclick = () => onPick(v);
+    el.appendChild(b);
+  }
+}
+const FUNDS = () => [...new Set(OPTS.doc_types.map(t => TI(t).fund))];
+const KINDS = () => [...new Set(OPTS.doc_types.map(t => TI(t).kind))];
+function currentSettings() {
+  return { doc_type: sel.doc_type, amcs: picked(), year: +$("#year").value, month: $("#month").value };
+}
+function renderTypes() {
+  const cur = TI(sel.doc_type);
+  const pick = t => { if (!t) return; sel.doc_type = t; save(); $("#amc-q").value = ""; renderTypes(); renderAmcs(); renderSelected(); };
+  segButtons($("#funds"), FUNDS(), cur.fund, f => f, f => pick(typeOf(f, cur.kind)));
+  segButtons($("#types"), KINDS(), cur.kind, k => KIND_LABEL[k] || k, k => pick(typeOf(cur.fund, k)));
+  $("#amc-label").textContent = mlabel();
+  $("#amc-q").placeholder = `Search ${mlabel()}…`;
+}
+function renderAmcs() {
+  const q = $("#amc-q").value.toLowerCase();
+  $("#amc-list").innerHTML = "";
+  for (const a of pool().filter(a => a.toLowerCase().includes(q))) {
+    const l = document.createElement("label");
+    l.innerHTML = '<input type="checkbox"><span></span>';
+    l.lastChild.textContent = a; l.firstChild.checked = sel.amcs.has(a);
+    l.firstChild.onchange = e => { e.target.checked ? sel.amcs.add(a) : sel.amcs.delete(a); save(); renderSelected(); };
+    $("#amc-list").appendChild(l);
+  }
+}
+function renderSelected() {
+  const p = picked(), L = mlabel();
+  $("#amc-btn").textContent = p.length === 0 ? `Select ${L}s` : p.length === 1 ? p[0] : `${p.length} ${L}s selected`;
+  $("#amc-chips").innerHTML = "";
+  for (const a of p) {
+    const c = document.createElement("span"); c.className = "chip";
+    c.innerHTML = '<span></span><button type="button" title="Remove">×</button>';
+    c.firstChild.textContent = shortName(a);
+    c.lastChild.onclick = () => { sel.amcs.delete(a); save(); renderSelected(); renderAmcs(); };
+    $("#amc-chips").appendChild(c);
+  }
+  renderHint();
+}
+function setCollapsed(c) {
+  $("#view-upload").classList.toggle("collapsed", c);
+  $("#collapse").setAttribute("aria-expanded", String(!c)); $("#expand").setAttribute("aria-expanded", String(!c));
+  try { localStorage.setItem("sideCollapsed", c ? "1" : ""); } catch {}
+}
+function renderRail() {
+  const p = picked(), L = mlabel();
+  const amc = p.length === 0 ? `no ${L} selected` : p.length === 1 ? shortName(p[0]) : `${p.length} ${L}s`;
+  $("#rail-txt").textContent = `${sel.doc_type} · ${amc} · ${$("#month").value} ${$("#year").value}`;
+}
+function renderHint() {
+  renderRail();
+  const y = $("#year").value, m = $("#month").value, t = TI(sel.doc_type), L = t.manager_label;
+  const fname = (t.file_name || "").replace("{name}", `<${L}>`).replace("{short}", `<${L}>`);
+  $("#dest-hint").textContent = t.layout === "amc_file"
+    ? `Saved as “${fname}.pdf” in ${t.root}/${y}/${m}/ (one file per ${L}).`
+    : `Each file goes into its own ${L}'s folder in ${t.root}/${y}/${m}/ (matched by file name or contents).`;
+}
+async function initSettings() {
+  OPTS = await api("/api/options");
+  let saved = {}; try { saved = JSON.parse(localStorage.getItem("dest") || "{}"); } catch {}
+  sel.doc_type = OPTS.doc_types.includes(saved.doc_type) ? saved.doc_type : OPTS.default.doc_type;
+  const known = new Set(OPTS.doc_types.flatMap(t => TI(t).managers));
+  (saved.amcs || []).filter(a => known.has(a)).forEach(a => sel.amcs.add(a));
+  $("#year").innerHTML = OPTS.years.map(y => `<option>${y}</option>`).join("");
+  $("#month").innerHTML = OPTS.months.map(m => `<option>${m}</option>`).join("");
+  $("#year").value = OPTS.default.year; $("#month").value = OPTS.default.month;
+  $("#year").onchange = $("#month").onchange = renderHint;
+  renderTypes(); renderAmcs(); renderSelected();
+  $("#amc-btn").onclick = () => { $("#amc").classList.toggle("open"); $("#amc-q").focus(); };
+  $("#amc-q").oninput = renderAmcs;
+  $("#amc-all").onclick = () => { pool().forEach(a => sel.amcs.add(a)); save(); renderAmcs(); renderSelected(); };
+  $("#amc-none").onclick = () => { pool().forEach(a => sel.amcs.delete(a)); save(); renderAmcs(); renderSelected(); };
+  document.addEventListener("click", e => { if (!$("#amc").contains(e.target)) $("#amc").classList.remove("open"); });
+  $("#collapse").onclick = () => setCollapsed(true);
+  document.querySelector(".rail").onclick = () => { setCollapsed(false); $("#collapse").focus(); };
+  let c = false; try { c = localStorage.getItem("sideCollapsed") === "1"; } catch {}
+  setCollapsed(c);
+}
+
+// ---------- coverage view ----------
+const cov = { doc_type: "Monthly Portfolio Disclosure", loaded: "", data: null, seq: 0 };
+const SHORT = { "Large Cap": "Large", "Mid Cap": "Mid", "Small Cap": "Small", "Flexi Cap": "Flexi", "Focused": "Focused",
+  "Value / Contra": "Value / Contra", "Balanced Advantage": "Bal. Adv.", "Multi Asset": "Multi Asset",
+  "Business Cycle": "Bus. Cycle", "Conservative Hybrid": "Cons. Hybrid",
+  "Equity Long-Short": "Equity L/S", "Equity Ex-Top 100": "Ex-Top 100", "Hybrid Long-Short": "Hybrid L/S",
+  "Active Asset Allocator": "Asset Alloc.", "Sector Rotation": "Sector Rot.", "Debt Long-Short": "Debt L/S" };
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+const MK = { uploaded: '<span class="mk up" aria-label="Uploaded">✓</span>', missing: '<span class="mk miss" aria-label="Missing">✕</span>',
+  na: '<span class="mk na" aria-label="Not offered">–</span>' };
+
+function showView(v) {
+  if (!["upload", "coverage", "parsed"].includes(v)) v = "upload";
+  document.querySelectorAll(".tabs button").forEach(b => b.classList.toggle("on", b.dataset.view === v));
+  $("#view-upload").hidden = v !== "upload"; $("#view-coverage").hidden = v !== "coverage"; $("#view-parsed").hidden = v !== "parsed";
+  try { localStorage.setItem("view", v); } catch {}
+  if (v === "coverage") loadCoverage(false);
+  if (v === "parsed") loadParsed();
+}
+function initCoverage() {
+  try { cov.doc_type = localStorage.getItem("covType") || cov.doc_type; } catch {}
+  if (!OPTS.doc_types.includes(cov.doc_type)) cov.doc_type = OPTS.default.doc_type;
+  $("#cov-year").innerHTML = OPTS.years.map(y => `<option>${y}</option>`).join("");
+  $("#cov-month").innerHTML = OPTS.months.map(m => `<option>${m}</option>`).join("");
+  $("#cov-year").value = OPTS.default.year; $("#cov-month").value = OPTS.default.month;
+  const types = () => {
+    const cur = TI(cov.doc_type);
+    const pick = t => { if (!t) return; cov.doc_type = t; try { localStorage.setItem("covType", t); } catch {} types(); loadCoverage(false); };
+    segButtons($("#cov-funds"), FUNDS(), cur.fund, f => f, f => pick(typeOf(f, cur.kind)));
+    segButtons($("#cov-types"), KINDS(), cur.kind, k => KIND_LABEL[k] || k, k => pick(typeOf(cur.fund, k)));
+    $("#cov-gaps-l").textContent = cur.manager_label + "s";
+  };
+  types();
+  $("#cov-year").onchange = $("#cov-month").onchange = () => loadCoverage(false);
+  $("#cov-gaps").onchange = () => cov.data && renderCoverage(cov.data);
+  $("#cov-refresh").onclick = () => loadCoverage(true);
+  document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => showView(b.dataset.view));
+  const tip = $("#tip");
+  $("#cov-body").addEventListener("mousemove", e => {
+    const t = e.target.closest("[data-tip]");
+    if (!t) { tip.style.display = "none"; return; }
+    tip.textContent = t.dataset.tip; tip.style.display = "block";
+    const x = Math.min(e.clientX + 14, innerWidth - tip.offsetWidth - 8);
+    tip.style.left = x + "px"; tip.style.top = (e.clientY + 16) + "px";
+  });
+  $("#cov-body").addEventListener("mouseleave", () => tip.style.display = "none");
+}
+async function loadCoverage(refresh) {
+  const key = `${cov.doc_type}|${$("#cov-year").value}|${$("#cov-month").value}`;
+  if (!refresh && key === cov.loaded && cov.data) return renderCoverage(cov.data);
+  const seq = ++cov.seq;
+  $("#cov-body").innerHTML = `<p class="dots" style="color:var(--muted)">Reading Google Drive (the first load of a month takes about 20 seconds)</p>`;
+  try {
+    const q = new URLSearchParams({ doc_type: cov.doc_type, year: $("#cov-year").value, month: $("#cov-month").value, refresh });
+    const d = await api("/api/coverage?" + q);
+    if (seq !== cov.seq) return;  // a newer request replaced this one
+    cov.data = d; cov.loaded = key; renderCoverage(d);
+  } catch (e) {
+    if (seq === cov.seq) $("#cov-body").innerHTML = `<div class="banner">Could not load coverage: ${esc(e.message)}</div>`;
+  }
+}
+function renderCoverage(d) {
+  const gapsOnly = $("#cov-gaps").checked;
+  let h = "";
+  if (!d.month_exists) h += `<div class="banner">There is no <b>${esc(d.path)}</b> folder in Drive yet, so everything for this month shows as missing.</div>`;
+  const L = d.manager_label || "AMC";
+  if (d.layout === "amc_file") {
+    const up = d.rows.filter(r => r.status === "uploaded").length;
+    h += `<div class="tiles"><div class="tile"><div class="k">Factsheets uploaded</div><div class="v">${up} <small>of ${d.rows.length} ${L}s</small></div></div>
+          <div class="tile"><div class="k">Missing</div><div class="v">${d.rows.length - up}</div></div></div>`;
+    h += `<div class="legend"><span>${MK.uploaded} Uploaded</span><span>${MK.missing} Missing</span><span>${esc(d.path)}</span></div><div class="fs-grid">`;
+    for (const r of d.rows.filter(r => !gapsOnly || r.status === "missing")) {
+      h += `<div class="fs" data-tip="${esc(r.status === "uploaded" ? r.files.join("\n") : `No factsheet for this ${L}`)}">${MK[r.status]}
+            <div class="t"><b>${esc(r.amc)}</b><small>${r.status === "uploaded" ? esc(r.files.join(", ")) : "Missing"}</small></div></div>`;
+    }
+    h += `</div>`;
+  } else {
+    const exp = d.rows.reduce((s, r) => s + r.expected, 0), up = d.rows.reduce((s, r) => s + r.uploaded, 0);
+    const complete = d.rows.filter(r => r.expected > 0 && r.uploaded >= r.expected).length;
+    const gaps = d.rows.filter(r => r.uploaded < r.expected);
+    h += `<div class="tiles">
+      <div class="tile"><div class="k">Funds uploaded</div><div class="v">${up} <small>of ${exp} expected</small></div></div>
+      <div class="tile"><div class="k">${L}s complete</div><div class="v">${complete} <small>of ${d.rows.length}</small></div></div>
+      <div class="tile"><div class="k">Funds missing</div><div class="v">${exp - up} <small>across ${gaps.length} ${L}${gaps.length === 1 ? "" : "s"}</small></div></div></div>`;
+    h += `<div class="legend"><span>${MK.uploaded} Uploaded</span><span>${MK.missing} Missing (the ${L} had it in ${esc(d.lookback.join(", "))})</span>
+          <span>${MK.na} Not offered by this ${L}</span></div>`;
+    h += `<div class="tbl-wrap"><table class="cov-t"><thead><tr><th class="amc">${L}</th>${d.categories.map(c => `<th title="${esc(c)}">${esc(SHORT[c] || c)}</th>`).join("")}<th class="done">Done</th></tr></thead><tbody>`;
+    const rows = gapsOnly ? gaps : d.rows;
+    if (!rows.length) h += `<tr><td colspan="${d.categories.length + 2}" style="padding:16px;color:var(--muted)">No gaps: every ${L} has all its expected funds.</td></tr>`;
+    for (const r of rows) {
+      const pct = r.expected ? Math.round(100 * r.uploaded / r.expected) : 0;
+      h += `<tr><td class="amc">${esc(r.amc)}${r.folder_missing ? `<small>${L} folder missing in Drive</small>` : ""}</td>`;
+      for (const c of d.categories) {
+        const cell = r.cells[c];
+        const tip = `${r.amc} · ${c}\n` + (cell.status === "uploaded" ? cell.files.join("\n") : cell.status === "missing" ? "Missing this month" : "Not offered (none in the last 3 months)");
+        h += `<td data-tip="${esc(tip)}">${MK[cell.status]}</td>`;
+      }
+      h += `<td class="done">${r.uploaded}/${r.expected}<span class="bar"><i style="width:${pct}%"></i></span></td></tr>`;
+    }
+    h += `</tbody></table></div>`;
+    const other = d.rows.filter(r => r.other.length);
+    if (other.length) h += `<p class="note">Files not matched to a category: ${other.map(r => `${esc(r.amc)}: ${esc(r.other.join(", "))}`).join("; ")}</p>`;
+  }
+  $("#cov-body").innerHTML = h;
+}
+
+// ---------- parsed view (files stored in Azure + their parsed JSON) ----------
+const pz = { doc_type: "Monthly Portfolio Disclosure", data: null, sel: null, seq: 0, timer: null };
+const ST_LABEL = { done: "Parsed", failed: "Failed", running: "Parsing", queued: "Queued" };
+const pending = p => p && (p.status === "queued" || p.status === "running");
+const num = (v, d = 2) => v == null || v === "" ? "" : Number(v).toLocaleString("en-IN", { maximumFractionDigits: d });
+
+function initParsed() {
+  try { pz.doc_type = localStorage.getItem("pzType") || pz.doc_type; } catch {}
+  if (!OPTS.doc_types.includes(pz.doc_type)) pz.doc_type = OPTS.default.doc_type;
+  $("#pz-year").innerHTML = OPTS.years.map(y => `<option>${y}</option>`).join("");
+  $("#pz-month").innerHTML = OPTS.months.map(m => `<option>${m}</option>`).join("");
+  $("#pz-year").value = OPTS.default.year; $("#pz-month").value = OPTS.default.month;
+  const types = () => {
+    const cur = TI(pz.doc_type);
+    const pick = t => { if (!t) return; pz.doc_type = t; try { localStorage.setItem("pzType", t); } catch {} types(); loadParsed(); };
+    segButtons($("#pz-funds"), FUNDS(), cur.fund, f => f, f => pick(typeOf(f, cur.kind)));
+  };
+  // Only Monthly Portfolio files are listed here; factsheets are parsed by themselves and show up as managers + AUM.
+  pz.doc_type = typeOf(TI(pz.doc_type).fund, "Portfolio") || OPTS.default.doc_type;
+  types();
+  $("#pz-year").onchange = $("#pz-month").onchange = () => loadParsed();
+  $("#pz-refresh").onclick = () => loadParsed();
+  $("#pz-view").innerHTML = viewNote;
+}
+
+async function loadParsed(quiet = false) {
+  clearTimeout(pz.timer);
+  const seq = ++pz.seq;
+  if (!quiet) $("#pz-list").innerHTML = `<p class="dots" style="color:var(--muted)">Reading storage</p>`;
+  try {
+    const q = new URLSearchParams({ doc_type: pz.doc_type, year: $("#pz-year").value, month: $("#pz-month").value });
+    const d = await api("/api/parsed?" + q);
+    if (seq !== pz.seq) return;
+    pz.data = d; renderParsedList(d);
+    // Poll while the portfolio file or its factsheet is parsing, only while this tab is open.
+    const busy = f => pending(f.parse) || pending(f.factsheet);
+    if (d.files.some(busy)) pz.timer = setTimeout(() => !$("#view-parsed").hidden && loadParsed(true), 4000);
+    // The open file finished parsing (itself or its factsheet): show the new result.
+    const sel = pz.sel && d.files.find(f => f.path === pz.sel);
+    if (quiet && sel && pz.selBusy && !busy(sel) && sel.parse && sel.parse.status === "done") showParsed(sel.path);
+    if (sel) pz.selBusy = busy(sel);
+  } catch (e) {
+    if (seq === pz.seq) $("#pz-list").innerHTML = `<div class="banner">Could not read storage: ${esc(e.message)}</div>`;
+  }
+}
+
+const viewNote = `<p class="note">Choose a file to see its parsed JSON.</p>`;
+const plural = (n, w) => `${num(n, 0)} ${w}${n === 1 ? "" : "s"}`;
+const cr = v => v == null || v === "" ? "–" : `₹${num(v)} Cr`;
+
+function factsheetLine(fs, p, reads) {
+  // About THIS file's fund: is it in a category the factsheet parser reads, and did the factsheet run cover it?
+  const cats = p && p.categories || [];
+  if (p && p.status === "done" && cats.length && !(p.factsheet_categories || []).length)
+    return `<small class="fsl" title="The factsheet parser reads ${esc((reads || []).join(", "))}">Factsheet: not read for ${esc(cats.join(", "))} funds (no managers / AUM)</small>`;
+  if (!fs) return `<small class="fsl">Factsheet: not uploaded</small>`;
+  const st = fs.status;
+  if (st === "done" && p && p.status === "done" && (p.factsheet_categories || []).some(c => !(fs.categories || []).includes(c)) && fs.scope !== "all")
+    return `<small class="fsl err">Factsheet: parsed without this fund. Use Parse again → Factsheet</small>`;
+  const txt = st === "stored" ? "not parsed yet"
+    : pending(fs) ? `<span class="dots">${st === "queued" ? "queued" : "parsing"}</span>`
+    : st === "done" ? `managers and AUM read${fs.portfolio_month ? ` · data for ${esc(fs.portfolio_month)}` : ""}`
+      + ((fs.missing_manager || []).length ? ` · <span class="err">no manager: ${esc(fs.missing_manager.join(", "))}</span>` : "")
+      + ((fs.missing_aum || []).length ? ` · <span class="err">no AUM: ${esc(fs.missing_aum.join(", "))}</span>` : "")
+      + (fs.retried && (fs.retried.fixed || []).length ? ` · second pass found ${esc(fs.retried.fixed.join(", "))}` : "")
+    : esc(fs.error || "failed");
+  return `<small class="fsl${st === "failed" ? " err" : ""}" title="${esc(fs.path || "")}">Factsheet: ${txt}</small>`;
+}
+
+function renderParsedList(d) {
+  let h = "";
+  if (d.backend === "local") h += `<div class="banner">Storage is a local folder: set <b>AZURE_STORAGE_CONNECTION_STRING</b> to use Azure Blob Storage.</div>`;
+  if (!d.parseable) h += `<p class="note" style="margin-top:0">There is no parser for ${esc(pz.doc_type)} yet. These files are stored only.</p>`;
+  if (!d.files.length) {
+    h += `<p class="note" style="margin-top:0">Nothing stored for <b>${esc(d.prefix)}</b> yet. Files are stored here, and parsed, when they are uploaded to Drive from the Upload tab.</p>`;
+    $("#pz-list").innerHTML = h; return;
+  }
+  const groups = {};
+  for (const f of d.files) (groups[f.amc || ""] ||= []).push(f);
+  for (const [amc, files] of Object.entries(groups)) {
+    if (amc) h += `<h3>${esc(amc)}</h3>`;
+    for (const f of files) {
+      const p = f.parse, st = p ? p.status : "none", busy = pending(p) || pending(f.factsheet);
+      const info = !p ? (d.parseable ? "Not parsed" : "Stored")
+        : st === "done" ? `${plural(p.funds, "fund")} · ${num(p.holdings_count, 0)} holdings · sum check ${esc(p.pct_status || "–")}`
+        : st === "failed" ? esc(p.error || "Failed") : "";
+      h += `<div class="pf${f.path === pz.sel ? " sel" : ""}" data-path="${esc(f.path)}">
+        <div class="top"><span class="nm" title="${esc(f.name)}">${esc(f.name)}</span>${p ? `<span class="st ${esc(st)}${pending(p) ? " dots" : ""}">${ST_LABEL[st] || esc(st)}</span>` : ""}</div>
+        ${info ? `<small class="${st === "failed" ? "err" : ""}">${info}</small>` : ""}
+        ${"factsheet" in f ? factsheetLine(f.factsheet, p, d.factsheet_reads) : ""}
+        <div class="acts">${p && !pending(p) ? `<button type="button" data-act="view">View</button>` : ""}
+          ${d.parseable && !busy ? `<button type="button" data-act="ask">${p ? "Parse again" : "Parse"}</button>` : ""}</div>
+        <div class="acts ask" hidden><span>Parse again:</span>
+          <button type="button" data-what="portfolio" title="This Excel file: holdings">Portfolio</button>
+          <button type="button" data-what="factsheet" ${f.factsheet ? "" : "disabled"} title="${f.factsheet ? `${esc(amc)}'s factsheet: fund managers and AUM` : "No factsheet of this AMC is stored for this month or the next"}">Factsheet</button>
+          <button type="button" data-what="both" ${f.factsheet ? "" : "disabled"}>Both</button>
+          <button type="button" data-act="cancel">Cancel</button></div></div>`;
+    }
+  }
+  $("#pz-list").innerHTML = h;
+  $("#pz-list").querySelectorAll(".pf button").forEach(b => b.onclick = async () => {
+    const card = b.closest(".pf"), path = card.dataset.path, ask = card.querySelector(".ask");
+    if (b.dataset.act === "view") return showParsed(path);
+    if (b.dataset.act === "ask" || b.dataset.act === "cancel") {
+      const open = b.dataset.act === "ask";
+      ask.hidden = !open; card.querySelector(".acts:not(.ask)").hidden = open;
+      if (open) clearTimeout(pz.timer); else loadParsed(true);
+      return;
+    }
+    const what = b.dataset.what;
+    ask.querySelectorAll("button").forEach(x => x.disabled = true);
+    try {
+      await api("/api/parsed/run", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path, what }) });
+      pz.sel = path; pz.selBusy = true;
+      document.querySelectorAll(".pf").forEach(x => x.classList.toggle("sel", x.dataset.path === path));
+      const t = { portfolio: "the portfolio file (about 20 seconds)", factsheet: "the factsheet (a few minutes)", both: "the portfolio file, then the factsheet (a few minutes)" }[what];
+      $("#pz-view").innerHTML = `<p class="dots" style="color:var(--muted)">Parsing ${t}${d.runner === "queue" ? ", plus up to a minute for the parse job to start" : ""}</p>`;
+      loadParsed(true);
+    } catch (e) {
+      loadParsed(true);
+      $("#pz-view").innerHTML = `<div class="banner">${esc(e.message)}</div>`;
+    }
+  });
+}
+
+function holdingsTable(rows) {
+  let h = `<div class="h-wrap"><table class="h-t"><thead><tr><th>Instrument</th><th>ISIN</th><th>Asset class</th><th>Type</th><th>Industry</th><th>Market cap</th><th class="n">% NAV</th></tr></thead><tbody>`;
+  for (const x of rows) h += `<tr><td>${esc(x.instrument || "")}${x.symbol ? ` <small style="color:var(--muted)">${esc(x.symbol)}</small>` : ""}</td><td>${esc(x.isin || "")}</td>
+    <td>${esc(x.asset_class || "")}</td><td>${esc(x.subType || "")}</td><td>${esc(x.industry || "")}</td><td>${esc(x.market_cap || "")}</td><td class="n">${num(x.holdings)}</td></tr>`;
+  return h + `</tbody></table></div>`;
+}
+const smallTable = (heads, rows) => `<div class="h-wrap mini"><table class="h-t"><thead><tr>${heads.map(x => `<th>${x}</th>`).join("")}</tr></thead><tbody>${
+  rows.map(r => `<tr>${r.map(c => `<td>${esc(c ?? "")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+const tile = (k, v, color) => `<div class="tile"><div class="k">${k}</div><div class="v"${color ? ` style="color:${color}"` : ""}>${v}</div></div>`;
+const fundBox = (open, title, sub, body) => `<details class="fund"${open ? " open" : ""}><summary class="fund-h"><span>${esc(title)} <small>${sub}</small></span></summary>${body}</details>`;
+
+const MODE_LABEL = { table: "Table", json: "JSON", excel: "Excel", pdf: "PDF" };
+
+function viewerHead(title, sub, acts, modes) {
+  return `<div class="pz-head"><div><h3>${esc(title)}</h3><small style="color:var(--muted)">${esc(sub)}</small></div>
+    <div class="acts">${modes && modes.length > 1 ? `<div class="seg pz-mode" id="pz-mode" style="grid-template-columns:repeat(${modes.length},auto)">${
+      modes.map(m => `<button type="button" data-m="${m}">${MODE_LABEL[m]}</button>`).join("")}</div>` : ""}
+    ${acts}<button type="button" id="pz-close" title="Close">Close</button></div></div>`;
+}
+
+// src: {excel: path of the uploaded workbook, pdf: path of the factsheet PDF, pdfPage: async () => page number}
+function wireViewer(raw, src = {}) {
+  $("#pz-close").onclick = () => {
+    pz.sel = null; pz.selStatus = null;
+    document.querySelectorAll(".pf.sel").forEach(x => x.classList.remove("sel"));
+    $("#pz-view").innerHTML = viewNote;
+  };
+  const mode = $("#pz-mode");
+  if (!mode) return;
+  const modes = [...mode.querySelectorAll("button")].map(b => b.dataset.m);
+  // One switch between the table, the JSON it was built from, and the source files; kept for the next file.
+  const set = m => {
+    if (!modes.includes(m)) m = modes[0];
+    pz.mode = m;
+    mode.querySelectorAll("button").forEach(b => b.classList.toggle("on", b.dataset.m === m));
+    const pre = $("#pz-json"), box = $("#pz-src");
+    if (m === "json" && pre && !pre.textContent) pre.textContent = JSON.stringify(raw, null, 2);
+    if (pre) pre.hidden = m !== "json";
+    $("#pz-table").hidden = m !== "table";
+    box.hidden = m !== "excel" && m !== "pdf";
+    if (m === "excel") showExcel(box, src.excel);
+    if (m === "pdf") showPdf(box, src.pdf, src.pdfPage);
+  };
+  mode.querySelectorAll("button").forEach(b => b.onclick = () => set(b.dataset.m));
+  set(pz.mode || "table");
+}
+
+async function showExcel(box, path) {
+  if (box.dataset.shown === "excel:" + path) return;
+  box.dataset.shown = "excel:" + path;
+  box.innerHTML = `<p class="dots" style="color:var(--muted)">Reading the workbook</p>`;
+  let d;
+  try { d = pz.sheets && pz.sheets.path === path ? pz.sheets : await api("/api/source/sheets?" + new URLSearchParams({ path })); }
+  catch (e) { box.innerHTML = `<div class="banner">${esc(e.message)}</div>`; box.dataset.shown = ""; return; }
+  pz.sheets = d;
+  if (box.dataset.shown !== "excel:" + path) return;
+  const render = i => {
+    const sh = d.sheets[i];
+    const width = Math.max(0, ...sh.rows.map(r => r.length));
+    box.innerHTML = `<div class="sheet-tabs">${d.sheets.map((s, j) => `<button type="button" data-i="${j}" class="${j === i ? "on" : ""}">${esc(s.name)}</button>`).join("")}
+        <a href="/api/source/file?${new URLSearchParams({ path })}" download>Download the Excel file</a></div>
+      ${sh.truncated ? `<p class="note" style="margin:4px 0">Showing the first ${sh.rows.length} rows and 40 columns.</p>` : ""}
+      <div class="h-wrap xl"><table class="h-t xl-t"><tbody>${sh.rows.map((r, k) =>
+        `<tr><th>${k + 1}</th>${Array.from({ length: width }, (_, c) => `<td>${esc(r[c] ?? "")}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`;
+    box.querySelectorAll(".sheet-tabs button").forEach(b => b.onclick = () => render(+b.dataset.i));
+  };
+  if (!d.sheets.length) { box.innerHTML = `<p class="note">This workbook has no sheets with data.</p>`; return; }
+  render(0);
+}
+
+async function showPdf(box, path, pageFn) {
+  if (box.dataset.shown === "pdf:" + path) return;
+  box.dataset.shown = "pdf:" + path;
+  let page = null;
+  try { page = pageFn ? await pageFn() : null; } catch {}
+  if (box.dataset.shown !== "pdf:" + path) return;
+  const url = `/api/source/file?${new URLSearchParams({ path })}${page ? `#page=${page}` : ""}`;
+  box.innerHTML = `<p class="note" style="margin:0 0 6px">${esc(path.split("/").pop())}${page ? ` · opened at page ${page}, this fund's page` : ""} ·
+      <a href="${url}" target="_blank" rel="noopener">open in a new tab</a></p>
+    <iframe class="pdf" src="${url}" title="Factsheet PDF"></iframe>`;
+}
+
+async function showParsed(path) {
+  pz.sel = path;
+  document.querySelectorAll(".pf").forEach(x => x.classList.toggle("sel", x.dataset.path === path));
+  $("#pz-view").innerHTML = `<p class="dots" style="color:var(--muted)">Loading</p>`;
+  let r;
+  try { r = await api("/api/parsed/result?" + new URLSearchParams({ path })); }
+  catch (e) { $("#pz-view").innerHTML = `<div class="banner">${esc(e.message)}</div>`; return; }
+  if (pz.sel !== path) return;
+  pz.selStatus = r.status;
+  const done = r.status === "done", q = new URLSearchParams({ path });
+  const isFs = r.kind === "factsheet";
+  let mg = null;  // portfolio: the file in the merged schema (holdings + fund managers + AUM)
+  if (done && !isFs) {
+    try { mg = await api("/api/parsed/merged?" + q); } catch {}
+    if (pz.sel !== path) return;
+  }
+  const merged = mg && mg.status === "done";
+
+  // source files to show next to the parsed data
+  const row = (pz.data && pz.data.files || []).find(f => f.path === path) || {};
+  const src = {};
+  if (!isFs && /\.xls[xmb]?$/i.test(path)) src.excel = path;
+  if (isFs) src.pdf = path;
+  else if (row.factsheet && row.factsheet.path) src.pdf = row.factsheet.path;
+  if (src.pdf) src.pdfPage = async () => {
+    // the page the factsheet parser found this file's fund on
+    const fsr = isFs ? r : await api("/api/parsed/result?" + new URLSearchParams({ path: src.pdf }));
+    const codes = new Set();
+    for (const cats of Object.values((merged ? mg.merged : r.holdings) || {})) for (const fs of Object.values(cats)) for (const f of fs) codes.add(String(f.scheme_amfi_code));
+    const hit = (fsr.rows || []).find(x => isFs || codes.has(String(x.scheme_code)));
+    return hit && hit.pdf_pages ? parseInt(String(hit.pdf_pages).split(",")[0]) : null;
+  };
+  const modes = [...(done ? ["table", "json"] : ["table"]), ...(src.excel ? ["excel"] : []), ...(src.pdf ? ["pdf"] : [])];
+
+  let h = viewerHead(path.split("/").pop(), path,
+    done ? `<a href="/api/parsed/${merged ? "merged/" : ""}download?${q}">Download JSON</a>` : "", modes);
+  h += `<div id="pz-table">`;
+  if (!done) {
+    h += `<div class="banner">${pending(r) ? "Still parsing." : esc(r.error || "Parsing failed.")}</div>`;
+    if (r.log_tail) h += `<pre class="json">${esc(r.log_tail)}</pre>`;
+  } else {
+    h += isFs ? factsheetBody(r) : portfolioBody(r, merged ? mg.merged : null);
+  }
+  h += `</div>${done ? `<pre class="json" id="pz-json" hidden></pre>` : ""}<div id="pz-src" hidden></div>`;
+  $("#pz-view").innerHTML = h;
+  wireViewer(merged ? mg.merged : r, src);
+}
+
+const MONTHS_ORDER = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
+
+// MF merge: [{name, startDate, endDate}] (one per stint). SIF merge: [{name, tenure: [[start, end], ...]}] (one per
+// manager). Both -> one {name, startDate, endDate} row per stint.
+function managerRows(list) {
+  return (list || []).flatMap(m => Array.isArray(m.tenure)
+    ? m.tenure.map(([startDate, endDate]) => ({ name: m.name, startDate, endDate }))
+    : [m]);
+}
+
+function portfolioBody(r, merged) {
+  const ck = r.checks || {};
+  // merged schema: {year: {category: [{fund_name, scheme_amfi_code, fund_manager: [...], <month>: {AUM, portfolio}}]}}
+  const src = merged || r.holdings || {};
+  const funds = [];
+  for (const [year, cats] of Object.entries(src)) for (const [cat, fs] of Object.entries(cats)) for (const f of fs)
+    for (const month of MONTHS_ORDER.filter(m => f[m])) {
+      const v = f[month], rows = Array.isArray(v) ? v : (v.portfolio || []);
+      funds.push({ f, cat, year, month, rows, aum: Array.isArray(v) ? null : v.AUM, mgrs: managerRows(f.fund_manager) });
+    }
+  const one = funds.length === 1 ? funds[0] : null;
+  let h = `<div class="tiles">${tile("Funds", r.funds)}${tile("Holdings", num(r.holdings_count, 0))}
+    ${tile("Sum to 100% NAV", esc(r.pct_status || "–"), r.pct_status === "OK" ? "var(--good)" : "var(--critical)")}
+    ${one ? tile("AUM", one.aum != null ? `₹${num(one.aum)} <small>Cr</small>` : "–") : tile("Parse time", `${num(r.seconds, 0)} <small>s</small>`)}</div>`;
+  if (!merged) h += `<p class="note" style="margin-top:0">Fund managers and AUM appear here once this AMC's factsheet is parsed.</p>`;
+  if ((ck.unclassified_rows || []).length) h += `<p class="note" style="margin-top:0">${ck.unclassified_rows.length} row(s) matched no rule and were left out (<a href="/api/parsed/download?${new URLSearchParams({ path: r.source })}">parser output</a>, checks.unclassified_rows).</p>`;
+  for (const x of funds) {
+    const total = x.rows.reduce((s, y) => s + (+y.holdings || 0), 0);
+    const current = x.mgrs.filter(m => m.endDate === "present").map(m => m.name);
+    let body = "";
+    if (merged) body += x.mgrs.length
+      ? `<div style="margin-bottom:8px">${smallTable(["Fund manager", "Since", "Till"], x.mgrs.map(m => [m.name, m.startDate || "–", m.endDate || "–"]))}</div>`
+      : `<p class="note" style="margin:4px 0 8px">No factsheet has listed this fund's managers yet.</p>`;
+    body += holdingsTable(x.rows);
+    h += fundBox(funds.length <= 1, x.f.fund_name,
+      `· ${esc(x.cat)} · AMFI ${esc(x.f.scheme_amfi_code || "–")} · ${esc(x.month)} ${esc(x.year)} · ${x.rows.length} holdings · ${num(total)}%`
+      + (merged ? ` · AUM ${cr(x.aum)} · ${esc(current.join(", ") || "no managers")}` : ""), body);
+  }
+  return h;
+}
+
+function factsheetBody(r) {
+  let h = `<div class="tiles">${tile("Funds", r.funds)}${tile("Managers", r.managers ?? 0)}
+    ${tile("Data as on", esc(r.as_on || "–"))}${tile("Parse time", `${num(r.seconds, 0)} <small>s</small>`)}</div>`;
+  h += `<p class="note" style="margin-top:0">${r.scope === "all" ? "Every fund in the factsheet's index was parsed."
+    : `Only the funds with an uploaded portfolio${r.categories_from ? ` (${esc(r.categories_from)})` : ""} were looked for: <b>${esc((r.categories || []).join(", "))}</b>. Use <b>Parse all funds</b> for the rest.`}</p>`;
+  if (r.warning) h += `<div class="banner">${esc(r.warning)}</div>`;
+  const list = (label, xs) => xs && xs.length ? `<p class="note" style="margin-top:0"><b>${label}:</b> ${xs.map(esc).join(", ")}</p>` : "";
+  h += list("No manager found", r.missing_manager) + list("No AUM found", r.missing_aum) + list("AUM to review", r.aum_review);
+  const funds = {};
+  for (const x of r.rows || []) (funds[x.scheme_code] ||= []).push(x);
+  const n = Object.keys(funds).length;
+  for (const [code, rows] of Object.entries(funds)) {
+    const f = rows[0];
+    let body = smallTable(["Fund manager", "Role", "Managing since", "As printed"],
+      rows.filter(x => x.fund_manager).map(x => [x.fund_manager, x.manager_role, x.managing_since, x.managing_since_raw]));
+    body += `<p class="note" style="margin:6px 0 0">AUM month end ${cr(f.aum_month_end_cr)} · monthly average ${cr(f.aum_monthly_avg_cr)} · as on ${esc(f.as_on_date || "–")} · check ${esc(f.aum_check || "–")} · PDF page ${esc(f.pdf_pages || "–")}</p>`;
+    if (f.notes) body += `<p class="note" style="margin:4px 0 0">${esc(f.notes)}</p>`;
+    h += fundBox(n <= 1, f.scheme_name, `· ${esc(f.category)} · AMFI ${esc(code)} · ${cr(f.aum_month_end_cr)} · ${plural(rows.filter(x => x.fund_manager).length, "manager")}`, body);
+  }
+  if ((r.exits || []).length) h += `<h4 class="fund-h">Manager exits printed in this factsheet</h4>` +
+    smallTable(["Fund", "Manager", "Exit date", "As printed"], r.exits.map(e => [e.scheme_name, e.fund_manager, e.exit_date, e.as_printed]));
+  return h;
+}
+
+(async () => {
+  await initSettings();
+  initCoverage();
+  initParsed();
+  let v = "upload"; try { v = localStorage.getItem("view") || v; } catch {}
+  showView(v);
+  // Agent memory is in-process, so a server restart starts a fresh chat.
+  const s = await api("/api/session", { method: "POST" });
+  if (!thread) { thread = s.thread_id; try { sessionStorage.setItem("thread", thread); } catch {} }
+  $("#who").textContent = "Google account: " + s.user_id;
+  renderFiles((await api(`/api/files?thread_id=${thread}`)).files);
+})();
+</script>
+</body>
+</html>

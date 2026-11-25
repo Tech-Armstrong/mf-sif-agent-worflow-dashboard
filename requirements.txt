@@ -11,3 +11,11 @@ pypdf>=5.0
 openpyxl>=3.1
 python-docx>=1.1
 fonttools>=4.50  # better PDF text extraction
+# Azure storage for uploaded files and parsed JSON, and the parse queues
+azure-storage-blob>=12.19
+azure-storage-queue>=12.9
+# portfolio parser and merge, when parsing inline (local runs); in Azure the parse jobs run them
+pandas>=2.0,<3.0
+xlrd>=2.0.1      # legacy .xls disclosures
+pyxlsb>=1.0.10   # .xlsb disclosures
+langsmith>=0.14  # imported by the parser's evaluation checks; tracing is turned off

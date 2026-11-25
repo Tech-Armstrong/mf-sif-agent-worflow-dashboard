@@ -1,0 +1,10 @@
+# parse-factsheet job: factsheet_parser.py of parsers/historical (MF) and parsers/sif (SIF) + storage.
+# torch is installed first from the CPU-only index (see factsheet.Dockerfile), so docling doesn't pull CUDA.
+-r requirements-portfolio.txt
+docling>=2.143
+pypdfium2>=5.14
+langgraph>=1.2
+langchain-openai>=1.7
+langchain-core>=1.7
+openai>=1.0
+pydantic>=2.0
