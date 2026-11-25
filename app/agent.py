@@ -188,7 +188,7 @@ def default_llm():
 
 
 def make_agent(user_id: str, checkpointer=None):
-    from composio_setup import get_session
+    from app.composio_setup import get_session
 
     tools = get_session(user_id).tools()  # LangChain StructuredTools (Composio meta tools)
     tools = [*tools, *make_local_tools(user_id)]  # uploaded-file tools (local disk -> Drive)
