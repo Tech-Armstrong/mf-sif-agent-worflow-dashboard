@@ -234,6 +234,68 @@ def parsed_run(body: ParseIn):
         raise HTTPException(400, str(e))
 
 
+class ManagerIn(BaseModel):
+    name: str
+    since: str  # YYYY-MM or YYYY-MM-DD
+    role: str = ""
+
+
+class FactsheetEditIn(BaseModel):
+    path: str  # the factsheet (files/...pdf)
+    scheme_code: str
+    aum_month_end_cr: float | str | None = None
+    aum_monthly_avg_cr: float | str | None = None
+    managers: list[ManagerIn] = []
+    scheme_name: str = ""  # only to add a fund the parser did not read
+    category: str = ""
+
+
+class FactsheetRevertIn(BaseModel):
+    path: str
+    scheme_code: str
+
+
+def _after_edit(path: str, r: dict) -> dict:
+    """Rebuild the month's merged JSON in storage now, so it shows the edit without waiting for a reader."""
+    info = parse_jobs.describe(path)
+    try:
+        parse_jobs.merged(info["year"], info["month"], fund=info["fund"])
+    except Exception as e:
+        r = {**r, "warning": f"Saved, but the month's merged JSON was not rebuilt: {e}"}
+    return {**r, "hand_edits": parse_jobs.factsheet_edits(path)}
+
+
+@app.get("/api/parsed/factsheet/edits")
+def factsheet_edits(path: str):
+    """The hand edits of one factsheet, {scheme_code: edit}."""
+    try:
+        return parse_jobs.factsheet_edits(path)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+@app.post("/api/parsed/factsheet/edit")
+def factsheet_edit(body: FactsheetEditIn):
+    """Set one fund's AUM and fund managers by hand: the factsheet's JSON, the merge's data and the merged JSON."""
+    try:
+        r = parse_jobs.edit_factsheet(body.path, body.scheme_code, body.aum_month_end_cr, body.aum_monthly_avg_cr,
+                                      [m.model_dump() for m in body.managers], body.scheme_name, body.category,
+                                      edited_by=USER_ID)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return _after_edit(body.path, r)
+
+
+@app.post("/api/parsed/factsheet/revert")
+def factsheet_revert(body: FactsheetRevertIn):
+    """Undo one fund's hand edit: back to what the parser read."""
+    try:
+        r = parse_jobs.revert_factsheet_edit(body.path, body.scheme_code)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return _after_edit(body.path, r)
+
+
 def _merged(year: int, month: str, rebuild: bool = False, fund: str = "MF") -> dict:
     if month.upper()[:3] not in drive_targets.MONTHS:
         raise HTTPException(400, "Unknown month.")

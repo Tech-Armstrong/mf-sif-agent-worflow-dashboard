@@ -85,6 +85,10 @@
   @media (prefers-color-scheme: dark) { :root { --na: #4a4a46; --grid: #2c2c2a; } }
   [hidden] { display: none !important; }
   .side-head { display: flex; justify-content: space-between; align-items: center; }
+  .side-tabs { margin: 12px 14px 0; }
+  .side-tabs #file-count:not(:empty)::before { content: "("; } .side-tabs #file-count:not(:empty)::after { content: ")"; }
+  .pane[hidden] { display: none !important; }
+  .files-pane { display: flex; flex-direction: column; flex: 1; min-height: 0; }
   .side-btn { border: 1px solid var(--line); background: var(--panel); color: var(--muted); padding: 0 8px; height: 26px; font-size: 15px; line-height: 1; border-radius: 6px; }
   .side-btn:hover { color: var(--ink); border-color: var(--muted); }
   .rail { display: none; }
@@ -124,6 +128,10 @@
   .cov-t th, .cov-t td { padding: 5px 6px; border-bottom: 1px solid var(--grid); text-align: center; }
   .cov-t thead th { font-weight: 600; color: var(--muted); font-size: 12px; vertical-align: bottom; white-space: nowrap; position: sticky; top: 0; background: var(--panel); }
   .cov-t th.amc, .cov-t td.amc { text-align: left; white-space: nowrap; padding-left: 12px; }
+  /* SIF: Equity / Debt / Hybrid above the strategies; full strategy names wrap */
+  .cov-t.grouped thead tr.grp th { top: 0; color: var(--ink); text-transform: uppercase; letter-spacing: .04em; font-size: 11px; border-bottom: 2px solid var(--line); }
+  .cov-t.grouped thead tr.grp th + th { border-left: 1px solid var(--line); }
+  .cov-t.grouped thead tr:not(.grp) th { top: 26px; white-space: normal; min-width: 90px; }
   .cov-t td.amc small { display: block; color: var(--critical); font-size: 11px; }
   .cov-t tr:last-child td { border-bottom: 0; }
   .cov-t tbody tr:hover { background: var(--bg); }
@@ -142,8 +150,10 @@
   .pz-list h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .03em; color: var(--muted); margin: 8px 0 0; }
   .pf { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; display: grid; gap: 4px; }
   .pf.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
-  .pf .top { display: flex; gap: 8px; align-items: center; }
-  .pf .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+  .pf { grid-template-columns: minmax(0, 1fr); }
+  .pf .top { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; min-width: 0; }
+  .pf .nm { max-width: 100%; overflow-wrap: anywhere; font-weight: 500; }
+  #pz-amc { max-width: 220px; }
   .pf small { color: var(--muted); font-size: 12px; }
   .pf small.err { color: var(--bad); }
   .pf .acts { display: flex; gap: 6px; }
@@ -167,6 +177,16 @@
   .h-t td.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
   .h-t tbody tr:hover { background: var(--bg); }
   .h-wrap.mini { max-height: none; }
+  .fs-edit { margin: 0 0 10px; }
+  .fs-edit .acts { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .fs-edit button { padding: 4px 11px; font-size: 13px; }
+  .fs-edit .tag { font-size: 12px; color: var(--accent); }
+  .ed-form { border: 1px solid var(--accent); border-radius: 8px; padding: 10px; margin-top: 8px; display: grid; gap: 10px; }
+  .ed-form input[type=text] { width: 100%; box-sizing: border-box; padding: 6px 8px; font-size: 13px; }
+  .ed-aum { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .ed-aum label { font-size: 12px; color: var(--muted); display: grid; gap: 4px; }
+  .ed-m td { padding: 3px 4px; } .ed-m td:last-child { width: 1%; }
+  .ed-msg { font-size: 12px; color: var(--bad); }
   .pf .fsl { display: block; margin-top: 2px; }
   .pf .acts[hidden] { display: none; }
   .pz-head .seg.pz-mode { grid-template-columns: 1fr 1fr; min-width: 150px; }
@@ -216,6 +236,7 @@
       <div class="seg fund" id="pz-funds"></div>
       <select id="pz-year" aria-label="Year"></select>
       <select id="pz-month" aria-label="Month"></select>
+      <select id="pz-amc" aria-label="AMC"><option value="">All</option></select>
       <button type="button" id="pz-refresh" style="margin-left:auto">Refresh</button>
     </div>
     <div class="pz">
@@ -230,9 +251,14 @@
       <button type="button" class="side-btn" id="expand" title="Show sidebar" aria-label="Show sidebar" aria-expanded="false">»</button>
       <span class="rail-txt" id="rail-txt"></span>
     </div>
-    <h2 class="side-head">Drive destination
+    <h2 class="side-head"><span id="side-title">Drive destination</span>
       <button type="button" class="side-btn" id="collapse" title="Hide sidebar" aria-label="Hide sidebar" aria-expanded="true">«</button>
     </h2>
+    <div class="seg side-tabs" id="side-tabs" role="tablist">
+      <button type="button" role="tab" data-p="dest" class="on">Destination</button>
+      <button type="button" role="tab" data-p="files">Files <span id="file-count"></span></button>
+    </div>
+    <div class="pane" data-pane="dest">
     <div class="settings">
       <label class="f">Fund
         <div class="seg" id="funds"></div>
@@ -257,13 +283,15 @@
       </div>
       <p class="hint" id="dest-hint"></p>
     </div>
-    <h2>Your files</h2>
+    </div>
+    <div class="pane files-pane" data-pane="files" hidden>
     <label id="drop"><b>Drop files here</b><br>or click to choose<br><small>PDF, Excel, Word, CSV, text · max 100 MB each</small>
       <input id="picker" type="file" multiple hidden>
     </label>
     <ul id="files"></ul>
     <div class="quick">
       <button data-q="Upload my files to Google Drive using the selected type, AMCs/SIFs, year and month.">Upload to Drive</button>
+    </div>
     </div>
   </section>
   <section class="panel" id="chat">
@@ -298,7 +326,19 @@ function setBusy(b) {
 }
 const kb = n => n < 1024 ? n + " B" : n < 1048576 ? (n / 1024).toFixed(0) + " KB" : (n / 1048576).toFixed(1) + " MB";
 
+// Left panel: one of "dest" (Drive destination) or "files" (drop zone, file list, Upload to Drive), kept per browser
+function showPane(p) {
+  if (p !== "files") p = "dest";
+  document.querySelectorAll("#left .pane").forEach(x => x.hidden = x.dataset.pane !== p);
+  document.querySelectorAll("#side-tabs button").forEach(b => b.classList.toggle("on", b.dataset.p === p));
+  $("#side-title").textContent = p === "files" ? "Your files" : "Drive destination";
+  try { localStorage.setItem("sidePane", p); } catch {}
+}
+document.querySelectorAll("#side-tabs button").forEach(b => b.onclick = () => showPane(b.dataset.p));
+try { showPane(localStorage.getItem("sidePane")); } catch { showPane("dest"); }
+
 function renderFiles(files) {
+  $("#file-count").textContent = files.length || "";
   const ul = $("#files"); ul.innerHTML = "";
   if (!files.length) { ul.innerHTML = '<li style="justify-content:center;color:var(--muted)">No files yet</li>'; return; }
   for (const f of files) {
@@ -487,9 +527,7 @@ async function initSettings() {
 const cov = { doc_type: "Monthly Portfolio Disclosure", loaded: "", data: null, seq: 0 };
 const SHORT = { "Large Cap": "Large", "Mid Cap": "Mid", "Small Cap": "Small", "Flexi Cap": "Flexi", "Focused": "Focused",
   "Value / Contra": "Value / Contra", "Balanced Advantage": "Bal. Adv.", "Multi Asset": "Multi Asset",
-  "Business Cycle": "Bus. Cycle", "Conservative Hybrid": "Cons. Hybrid",
-  "Equity Long-Short": "Equity L/S", "Equity Ex-Top 100": "Ex-Top 100", "Hybrid Long-Short": "Hybrid L/S",
-  "Active Asset Allocator": "Asset Alloc.", "Sector Rotation": "Sector Rot.", "Debt Long-Short": "Debt L/S" };
+  "Business Cycle": "Bus. Cycle", "Conservative Hybrid": "Cons. Hybrid" };  // SIF columns: the scheme master's full names
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
 const MK = { uploaded: '<span class="mk up" aria-label="Uploaded">✓</span>', missing: '<span class="mk miss" aria-label="Missing">✕</span>',
   na: '<span class="mk na" aria-label="Not offered">–</span>' };
@@ -569,7 +607,8 @@ function renderCoverage(d) {
       <div class="tile"><div class="k">Funds missing</div><div class="v">${exp - up} <small>across ${gaps.length} ${L}${gaps.length === 1 ? "" : "s"}</small></div></div></div>`;
     h += `<div class="legend"><span>${MK.uploaded} Uploaded</span><span>${MK.missing} Missing (the ${L} had it in ${esc(d.lookback.join(", "))})</span>
           <span>${MK.na} Not offered by this ${L}</span></div>`;
-    h += `<div class="tbl-wrap"><table class="cov-t"><thead><tr><th class="amc">${L}</th>${d.categories.map(c => `<th title="${esc(c)}">${esc(SHORT[c] || c)}</th>`).join("")}<th class="done">Done</th></tr></thead><tbody>`;
+    const grp = d.groups ? `<tr class="grp"><th class="amc"></th>${d.groups.map(g => `<th colspan="${g.categories.length}">${esc(g.name)}</th>`).join("")}<th></th></tr>` : "";
+    h += `<div class="tbl-wrap"><table class="cov-t${d.groups ? " grouped" : ""}"><thead>${grp}<tr><th class="amc">${L}</th>${d.categories.map(c => `<th title="${esc(c)}">${esc(SHORT[c] || c)}</th>`).join("")}<th class="done">Done</th></tr></thead><tbody>`;
     const rows = gapsOnly ? gaps : d.rows;
     if (!rows.length) h += `<tr><td colspan="${d.categories.length + 2}" style="padding:16px;color:var(--muted)">No gaps: every ${L} has all its expected funds.</td></tr>`;
     for (const r of rows) {
@@ -610,6 +649,7 @@ function initParsed() {
   pz.doc_type = typeOf(TI(pz.doc_type).fund, "Portfolio") || OPTS.default.doc_type;
   types();
   $("#pz-year").onchange = $("#pz-month").onchange = () => loadParsed();
+  $("#pz-amc").onchange = () => { pz.amc = $("#pz-amc").value; if (pz.data) renderParsedList(pz.data); };
   $("#pz-refresh").onclick = () => loadParsed();
   $("#pz-view").innerHTML = viewNote;
 }
@@ -658,8 +698,20 @@ function factsheetLine(fs, p, reads) {
   return `<small class="fsl${st === "failed" ? " err" : ""}" title="${esc(fs.path || "")}">Factsheet: ${txt}</small>`;
 }
 
+function amcFilter(d) {
+  // AMC dropdown: the AMCs (or SIFs) with files this month. A choice that isn't there this month falls back to All.
+  const amcs = [...new Set(d.files.map(f => f.amc || ""))].filter(Boolean).sort((a, b) => a.localeCompare(b));
+  if (pz.amc && !amcs.includes(pz.amc)) pz.amc = "";
+  const all = TI(pz.doc_type).fund === "SIF" ? "All SIFs" : "All AMCs";
+  $("#pz-amc").innerHTML = `<option value="">${all} (${amcs.length})</option>` + amcs.map(a => `<option>${esc(a)}</option>`).join("");
+  $("#pz-amc").value = pz.amc || "";
+  $("#pz-amc").hidden = amcs.length < 2;
+  return pz.amc ? d.files.filter(f => (f.amc || "") === pz.amc) : d.files;
+}
+
 function renderParsedList(d) {
   let h = "";
+  const files = amcFilter(d);
   if (d.backend === "local") h += `<div class="banner">Storage is a local folder: set <b>AZURE_STORAGE_CONNECTION_STRING</b> to use Azure Blob Storage.</div>`;
   if (!d.parseable) h += `<p class="note" style="margin-top:0">There is no parser for ${esc(pz.doc_type)} yet. These files are stored only.</p>`;
   if (!d.files.length) {
@@ -667,7 +719,7 @@ function renderParsedList(d) {
     $("#pz-list").innerHTML = h; return;
   }
   const groups = {};
-  for (const f of d.files) (groups[f.amc || ""] ||= []).push(f);
+  for (const f of files) (groups[f.amc || ""] ||= []).push(f);
   for (const [amc, files] of Object.entries(groups)) {
     if (amc) h += `<h3>${esc(amc)}</h3>`;
     for (const f of files) {
@@ -816,6 +868,16 @@ async function showParsed(path) {
 
   // source files to show next to the parsed data
   const row = (pz.data && pz.data.files || []).find(f => f.path === path) || {};
+  // the AMC's parsed factsheet, so its AUM and fund managers can be edited by hand
+  let fsx = null;
+  if (done && !isFs && row.factsheet && row.factsheet.path && row.factsheet.status === "done") {
+    const fq = new URLSearchParams({ path: row.factsheet.path });
+    try {
+      const [fr, edits] = await Promise.all([api("/api/parsed/result?" + fq), api("/api/parsed/factsheet/edits?" + fq)]);
+      if (fr.status === "done") fsx = { path: row.factsheet.path, r: fr, edits };
+    } catch {}
+    if (pz.sel !== path) return;
+  }
   const src = {};
   if (!isFs && /\.xls[xmb]?$/i.test(path)) src.excel = path;
   if (isFs) src.pdf = path;
@@ -837,11 +899,86 @@ async function showParsed(path) {
     h += `<div class="banner">${pending(r) ? "Still parsing." : esc(r.error || "Parsing failed.")}</div>`;
     if (r.log_tail) h += `<pre class="json">${esc(r.log_tail)}</pre>`;
   } else {
-    h += isFs ? factsheetBody(r) : portfolioBody(r, merged ? mg.merged : null);
+    h += isFs ? factsheetBody(r) : portfolioBody(r, merged ? mg.merged : null, fsx);
   }
   h += `</div>${done ? `<pre class="json" id="pz-json" hidden></pre>` : ""}<div id="pz-src" hidden></div>`;
   $("#pz-view").innerHTML = h;
   wireViewer(merged ? mg.merged : r, src);
+  if (fsx) wireEditors(path, fsx);
+}
+
+// ---- hand edits of a fund's AUM and managers (stored in the factsheet's JSON; the merged JSON is rebuilt) ----
+
+function editBlock(x, fsx) {
+  const code = String(x.f.scheme_amfi_code || "");
+  if (!fsx || !code) return "";
+  const ed = fsx.edits[code];
+  return `<div class="fs-edit" data-code="${esc(code)}" data-name="${esc(x.f.fund_name || "")}" data-cat="${esc(x.cat)}">
+    <div class="acts"><button type="button" data-ed="open">Edit managers and AUM</button>
+      ${ed ? `<span class="tag">Edited by hand ${esc((ed.edited_at || "").slice(0, 10))}${ed.edited_by ? ` by ${esc(ed.edited_by)}` : ""}</span>
+        <button type="button" data-ed="revert">Revert to parsed</button>` : ""}</div>
+    <div class="ed-form" hidden></div></div>`;
+}
+
+const mgrRow = (m = {}) => `<tr><td><input type="text" data-k="name" value="${esc(m.name || "")}" placeholder="Name"></td>
+  <td><input type="text" data-k="since" value="${esc(m.since || "")}" placeholder="YYYY-MM"></td>
+  <td><input type="text" data-k="role" value="${esc(m.role || "")}" placeholder="optional"></td>
+  <td><button type="button" data-ed="del" title="Remove this manager">✕</button></td></tr>`;
+
+function openEditor(box, fsx) {
+  const rows = (fsx.r.rows || []).filter(x => String(x.scheme_code) === box.dataset.code);
+  const f = rows[0] || {};
+  const mgrs = rows.filter(x => x.fund_manager).map(x => ({ name: x.fund_manager, since: x.managing_since, role: x.manager_role }));
+  const form = box.querySelector(".ed-form");
+  form.innerHTML = `${rows.length ? "" : `<small class="note" style="margin:0">The factsheet parser did not read this fund: saving adds it to ${esc(fsx.path.split("/").pop())}.</small>`}
+    <div class="ed-aum"><label>AUM month end (₹ Cr)<input type="text" data-k="aum" value="${esc(f.aum_month_end_cr || "")}" inputmode="decimal"></label>
+      <label>AUM monthly average (₹ Cr)<input type="text" data-k="avg" value="${esc(f.aum_monthly_avg_cr || "")}" inputmode="decimal"></label></div>
+    <table class="h-t ed-m"><thead><tr><th>Fund manager</th><th>Managing since</th><th>Role</th><th></th></tr></thead>
+      <tbody>${(mgrs.length ? mgrs : [{}]).map(mgrRow).join("")}</tbody></table>
+    <div class="acts" style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" data-ed="add">+ Add manager</button><span style="flex:1"></span>
+      <button type="button" data-ed="cancel">Cancel</button><button type="button" class="primary" data-ed="save">Save</button></div>
+    <small class="ed-msg"></small>`;
+  form.hidden = false;
+  box.querySelector(".acts").hidden = true;
+}
+
+function wireEditors(path, fsx) {
+  $("#pz-table").addEventListener("click", async e => {
+    const b = e.target.closest("button[data-ed]");
+    if (!b) return;
+    const box = b.closest(".fs-edit"), form = box.querySelector(".ed-form"), msg = () => form.querySelector(".ed-msg");
+    const act = b.dataset.ed;
+    if (act === "open") return openEditor(box, fsx);
+    if (act === "cancel") { form.hidden = true; form.innerHTML = ""; box.querySelector(".acts").hidden = false; return; }
+    if (act === "add") return form.querySelector("tbody").insertAdjacentHTML("beforeend", mgrRow());
+    if (act === "del") return b.closest("tr").remove();
+    const send = async (url, body) => {
+      box.querySelectorAll("button").forEach(x => x.disabled = true);
+      try {
+        await api(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        showParsed(path); loadParsed(true);
+      } catch (err) {
+        box.querySelectorAll("button").forEach(x => x.disabled = false);
+        if (msg()) { msg().textContent = err.message; msg().style.color = ""; } else alert(err.message);
+      }
+    };
+    if (act === "revert") {
+      if (!confirm("Go back to the AUM and fund managers the factsheet parser read?")) return;
+      return send("/api/parsed/factsheet/revert", { path: fsx.path, scheme_code: box.dataset.code });
+    }
+    if (act === "save") {
+      const val = k => form.querySelector(`[data-k="${k}"]`).value.trim();
+      const managers = [...form.querySelectorAll("tbody tr")].map(tr => ({
+        name: tr.querySelector('[data-k="name"]').value.trim(), since: tr.querySelector('[data-k="since"]').value.trim(),
+        role: tr.querySelector('[data-k="role"]').value.trim() })).filter(m => m.name || m.since);
+      const bad = managers.find(m => !m.name || !/^\d{4}-\d{2}(-\d{2})?$/.test(m.since));
+      if (bad) { msg().textContent = `Each manager needs a name and a "managing since" date as YYYY-MM or YYYY-MM-DD${bad.name ? ` (${bad.name})` : ""}.`; return; }
+      msg().textContent = "Saving, and rebuilding the merged JSON";
+      msg().style.color = "var(--muted)";
+      return send("/api/parsed/factsheet/edit", { path: fsx.path, scheme_code: box.dataset.code, aum_month_end_cr: val("aum"),
+        aum_monthly_avg_cr: val("avg"), managers, scheme_name: box.dataset.name, category: box.dataset.cat });
+    }
+  });
 }
 
 const MONTHS_ORDER = ["january", "february", "march", "april", "may", "june", "july", "august", "september", "october", "november", "december"];
@@ -854,7 +991,7 @@ function managerRows(list) {
     : [m]);
 }
 
-function portfolioBody(r, merged) {
+function portfolioBody(r, merged, fsx) {
   const ck = r.checks || {};
   // merged schema: {year: {category: [{fund_name, scheme_amfi_code, fund_manager: [...], <month>: {AUM, portfolio}}]}}
   const src = merged || r.holdings || {};
@@ -871,16 +1008,13 @@ function portfolioBody(r, merged) {
   if (!merged) h += `<p class="note" style="margin-top:0">Fund managers and AUM appear here once this AMC's factsheet is parsed.</p>`;
   if ((ck.unclassified_rows || []).length) h += `<p class="note" style="margin-top:0">${ck.unclassified_rows.length} row(s) matched no rule and were left out (<a href="/api/parsed/download?${new URLSearchParams({ path: r.source })}">parser output</a>, checks.unclassified_rows).</p>`;
   for (const x of funds) {
-    const total = x.rows.reduce((s, y) => s + (+y.holdings || 0), 0);
-    const current = x.mgrs.filter(m => m.endDate === "present").map(m => m.name);
-    let body = "";
+    let body = editBlock(x, fsx);
     if (merged) body += x.mgrs.length
       ? `<div style="margin-bottom:8px">${smallTable(["Fund manager", "Since", "Till"], x.mgrs.map(m => [m.name, m.startDate || "–", m.endDate || "–"]))}</div>`
       : `<p class="note" style="margin:4px 0 8px">No factsheet has listed this fund's managers yet.</p>`;
     body += holdingsTable(x.rows);
-    h += fundBox(funds.length <= 1, x.f.fund_name,
-      `· ${esc(x.cat)} · AMFI ${esc(x.f.scheme_amfi_code || "–")} · ${esc(x.month)} ${esc(x.year)} · ${x.rows.length} holdings · ${num(total)}%`
-      + (merged ? ` · AUM ${cr(x.aum)} · ${esc(current.join(", ") || "no managers")}` : ""), body);
+    // shown open, no summary line; a file with several funds keeps each fund's name above its data
+    h += (funds.length > 1 ? `<h4 class="fund-h">${esc(x.f.fund_name)}</h4>` : "") + body;
   }
   return h;
 }

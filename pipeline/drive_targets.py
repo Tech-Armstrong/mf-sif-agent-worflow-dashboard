@@ -275,8 +275,10 @@ def plan(doc_type: str, amc: str, year, month: str, filename: str) -> dict:
 
 # ---------- coverage (what's uploaded / missing for a month) ----------
 
-# Fund categories tracked per fund family. Each entry: (name, keywords). _MATCH_ORDER tries the
-# more specific names first ("dynamic asset allocation" before "asset allocation").
+# Fund categories tracked per fund family. Each entry: (name, file-name keywords). SIF categories are named
+# exactly as in sif_scheme_master.xlsx, and a parsed SIF file's own categories come first (_parsed_categories):
+# the keywords only place files not parsed yet.
+# "order" tries the more specific names first ("dynamic asset allocation" before "asset allocation").
 MF_CATEGORIES: list[tuple[str, list[str]]] = [
     ("Large Cap", ["large cap", "largecap", "bluechip"]),
     ("Mid Cap", ["mid cap", "midcap"]),
@@ -289,22 +291,27 @@ MF_CATEGORIES: list[tuple[str, list[str]]] = [
     ("Business Cycle", ["business cycle", "business cycles"]),
     ("Conservative Hybrid", ["conservative hybrid", "debt hybrid"]),
 ]
+# The official SIF investment strategies, in their official order (equity, debt, hybrid). Use these names exactly.
 SIF_CATEGORIES: list[tuple[str, list[str]]] = [
     ("Equity Long-Short", ["equity long short", "equity longshort", "long short", "longshort"]),
-    ("Equity Ex-Top 100", ["ex top 100", "extop 100", "ex top100", "extop100"]),
+    ("Equity Ex-Top 100 Long-Short", ["ex top 100", "extop 100", "ex top100", "extop100"]),
+    ("Sector Rotation Long-Short", ["sector rotation"]),
+    ("Debt Long-Short", ["debt long short", "debt longshort"]),
+    ("Sectoral Debt Long-Short", ["sectoral debt"]),
+    ("Active Asset Allocator Long-Short", ["active asset allocator", "asset allocator"]),
     ("Hybrid Long-Short", ["hybrid"]),
-    ("Active Asset Allocator", ["active asset allocator", "asset allocator"]),
-    ("Sector Rotation", ["sector rotation"]),
-    ("Debt Long-Short", ["debt"]),
-    ("Other", []),  # files whose name doesn't say the strategy, e.g. "SIF Platinum Monthly Portfolio.xlsx"
 ]
+SIF_GROUPS = [("Equity", ["Equity Long-Short", "Equity Ex-Top 100 Long-Short", "Sector Rotation Long-Short"]),
+              ("Debt", ["Debt Long-Short", "Sectoral Debt Long-Short"]),
+              ("Hybrid", ["Active Asset Allocator Long-Short", "Hybrid Long-Short"])]
 CATEGORY_SETS = {
     "mf": {"categories": MF_CATEGORIES, "fallback": None,
            "order": ["Business Cycle", "Conservative Hybrid", "Balanced Advantage", "Multi Asset",
                      "Flexi Cap", "Focused", "Value / Contra", "Large Cap", "Mid Cap", "Small Cap"]},
-    "sif": {"categories": SIF_CATEGORIES, "fallback": "Other",
-            "order": ["Equity Ex-Top 100", "Active Asset Allocator", "Sector Rotation", "Debt Long-Short",
-                      "Hybrid Long-Short", "Equity Long-Short"]},
+    "sif": {"categories": SIF_CATEGORIES, "fallback": None,
+            # file-name matching tries the more specific names first ("sectoral debt" before "debt")
+            "order": ["Equity Ex-Top 100 Long-Short", "Sector Rotation Long-Short", "Sectoral Debt Long-Short",
+                      "Debt Long-Short", "Active Asset Allocator Long-Short", "Hybrid Long-Short", "Equity Long-Short"]},
 }
 CATEGORIES = MF_CATEGORIES  # kept for older imports
 LOOKBACK_MONTHS = 3  # a category is "expected" if the AMC/SIF had it in any of these previous months
@@ -334,6 +341,25 @@ def _month_folder(doc_type: str, year: int, mon: str) -> dict | None:
     return _child_folder(y["id"], mon) if y else None
 
 
+def _parsed_categories(doc_type: str, year: int, mon: str) -> dict[tuple[str, str], list[str]]:
+    """{(amc, file name): categories} of the month's parsed files: the parser's exact categories (from the scheme
+    master / AMFI scheme), so a file named "prism october.xlsx" still lands in Hybrid Long-Short."""
+    from pipeline import blob_store
+
+    known = {c for c, _ in _cat_set(doc_type)["categories"]}
+    try:
+        idx = blob_store.get_json(f"{blob_store.PARSED}/{DOC_TYPES[doc_type]['root']}/{year}/{mon}/_index.json") or {}
+    except Exception:
+        return {}
+    out = {}
+    for src, e in idx.items():
+        parts = src.split("/")
+        cats = [c for c in (e or {}).get("categories") or [] if c in known]  # not the parser's "Others"
+        if len(parts) >= 6 and e.get("status") == "done" and cats:
+            out[(parts[-2], parts[-1])] = cats
+    return out
+
+
 def _portfolio_month(doc_type: str, year: int, mon: str) -> dict | None:
     """{amc: {"folder": drive name, "files": {category: [file names]}, "other": [...]}} or None if no month folder."""
     from concurrent.futures import ThreadPoolExecutor
@@ -341,6 +367,7 @@ def _portfolio_month(doc_type: str, year: int, mon: str) -> dict | None:
     m = _month_folder(doc_type, year, mon)
     if not m:
         return None
+    parsed = _parsed_categories(doc_type, year, mon) if DOC_TYPES[doc_type]["managers"] == "sif" else {}
     pool = managers_for(doc_type)
     folders = [f for f in _children(m["id"]) if f["mimeType"] == FOLDER_MIME]
     owner = {}
@@ -359,8 +386,12 @@ def _portfolio_month(doc_type: str, year: int, mon: str) -> dict | None:
         for c in listings[f["id"]]:
             if c["mimeType"] == FOLDER_MIME:
                 continue
-            cat = category_of(c["name"].strip(), doc_type)
-            (files.setdefault(cat, []) if cat else other).append(c["name"].strip())
+            name = c["name"].strip()
+            cats = parsed.get((amc, name)) or [cat for cat in [category_of(name, doc_type)] if cat]
+            for cat in cats:
+                files.setdefault(cat, []).append(name)
+            if not cats:
+                other.append(name)
         out[amc] = {"folder": f["name"].strip(), "files": files, "other": other}
     return out
 
@@ -411,7 +442,12 @@ def coverage(doc_type: str, year, month: str) -> dict:
             "expected": len(expected | present),
             "other": (now or {}).get("other", []),
         })
-    # Hide columns nobody has (e.g. no SIF runs a Sector Rotation fund yet).
-    cats = [c for c in all_cats if any(r["cells"][c]["status"] != "na" for r in rows)] or all_cats
-    return {**base, "month_exists": cur is not None, "categories": cats, "rows": rows,
+    groups = None
+    if cfg["managers"] == "sif":
+        # every official SIF strategy, under its group, also those no SIF runs yet
+        cats, groups = all_cats, [{"name": g, "categories": cs} for g, cs in SIF_GROUPS]
+    else:
+        # Hide columns nobody has.
+        cats = [c for c in all_cats if any(r["cells"][c]["status"] != "na" for r in rows)] or all_cats
+    return {**base, "month_exists": cur is not None, "categories": cats, "groups": groups, "rows": rows,
             "lookback": [f"{m} {y}" for y, m in _prev_months(yr, mon, LOOKBACK_MONTHS)]}

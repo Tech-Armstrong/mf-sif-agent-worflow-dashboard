@@ -83,6 +83,11 @@ def fs_state(fund: str) -> str:
     """Where every factsheet's rows of one fund kind are kept (manager tenures use all of them)."""
     return SIF_FACTSHEET_STATE if fund == "SIF" else FACTSHEET_STATE
 
+
+def fs_edits(fund: str) -> str:
+    """Hand edits of factsheet AUM / fund managers, {"<factsheet source>|<scheme code>": edit}: see edit_factsheet."""
+    return f"{blob_store.STATE}/{'sif_' if fund == 'SIF' else ''}factsheet_edits.json"
+
 # fund_details.csv columns (factsheet_parser.py), so the merge's CSV has a header even with no factsheets yet
 FS_COLUMNS = ["year", "factsheet_month", "as_on_date", "as_on_source", "portfolio_month", "amc", "fund_house",
               "category", "scheme_code", "scheme_name", "factsheet_fund_name", "index_page", "pdf_pages",
@@ -538,6 +543,8 @@ def _parse_factsheet(source: str, info: dict, result: dict, tmp: Path, scope: st
         # keep the other funds' rows from the last result
         new_codes = {r["scheme_code"] for r in rows}
         rows = [r for r in prev.get("rows") or [] if r.get("category") not in only and r["scheme_code"] not in new_codes] + rows
+    if rows:
+        rows = _apply_edits(source, info["fund"], rows)  # hand edits outlive a re-parse
     if not rows:
         if sif:
             error = (f"No strategy of {house} in the SIF scheme master was found in this factsheet (not launched yet, "
@@ -587,6 +594,7 @@ def _parse_factsheet(source: str, info: dict, result: dict, tmp: Path, scope: st
         aum_review=[first[c]["scheme_name"] for c in codes if first[c].get("aum_check") not in ("ok", "missing", None, "")],
         warning=(model_off.lstrip("! ") if model_off else None) or (f"Exit dates not read: {_tail(elog, 3)}" if erc else None),
         rows=rows, exits=exits, index_md=index_md[:20000],
+        edited=sorted({r["scheme_code"] for r in rows if r.get("aum_check") == "edited"}),
     )
 
 
@@ -707,6 +715,158 @@ def result(source: str) -> dict | None:
     if r is None:
         return _fresh(source, idx)
     return r
+
+
+# ---------- hand edits of factsheet AUM and fund managers ----------
+#
+# An edit replaces one fund's AUM and manager list in one factsheet. It is written to three places:
+#   state/[sif_]factsheet_edits.json   the edit itself, with the parsed rows it replaced (for "revert")
+#   parsed/<factsheet>.json            the factsheet's result, so the JSON shows the edited values
+#   state/[sif_]factsheets.json        what the merge reads: its new version rebuilds the merged JSON
+# A later parse of the same factsheet applies the edit again (_apply_edits), so it is not lost.
+
+def _since(v: str) -> str:
+    v = str(v or "").strip()
+    try:
+        datetime.strptime(v, "%Y-%m-%d" if len(v) == 10 else "%Y-%m")
+    except ValueError:
+        raise ValueError(f"'Managing since' must be YYYY-MM or YYYY-MM-DD, not '{v}'.")
+    return v
+
+
+def _amount(v) -> str:
+    if v is None or str(v).strip() == "":
+        return ""
+    try:
+        x = float(str(v).replace(",", "").strip())
+    except ValueError:
+        raise ValueError(f"AUM must be a number in crore, not '{v}'.")
+    if x < 0:
+        raise ValueError("AUM cannot be negative.")
+    return f"{x:.2f}"
+
+
+def _edited_rows(template: dict, edit: dict) -> list[dict]:
+    """One fund's factsheet rows (one per manager) with the edit's AUM and managers."""
+    info = describe(edit["source"])
+    month = f"{info['year']}-{MONTH_NUM[info['month']]:02d}"  # the factsheet's month, when the parser read no date
+    base = {**template, "aum_month_end_cr": edit["aum_month_end_cr"], "aum_monthly_avg_cr": edit["aum_monthly_avg_cr"],
+            "aum_check": "edited", "notes": f"edited by hand {edit['edited_at'][:10]}",
+            "year": template.get("year") or str(info["year"]), "factsheet_month": template.get("factsheet_month") or info["month"],
+            "portfolio_month": template.get("portfolio_month") or month}
+    if not edit["managers"]:
+        return [{**base, "fund_manager": "", "managing_since": "", "managing_since_raw": "", "manager_role": ""}]
+    return [{**base, "fund_manager": m["name"], "managing_since": m["since"], "managing_since_raw": "edited by hand",
+             "manager_role": m.get("role", "")} for m in edit["managers"]]
+
+
+def _apply_edits(source: str, fund: str, rows: list[dict]) -> list[dict]:
+    """A freshly parsed factsheet's rows with the hand edits made to it; each edit keeps the new parse for revert."""
+    edits = {k: v for k, v in (blob_store.get_json(fs_edits(fund)) or {}).items() if k.startswith(source + "|")}
+    if not edits:
+        return rows
+    out = list(rows)
+    for k, e in edits.items():
+        code = e["scheme_code"]
+        parsed = [r for r in out if r.get("scheme_code") == code and r.get("aum_check") != "edited"]
+        e["parsed_rows"] = parsed or e.get("parsed_rows") or []
+        template = (parsed or e["parsed_rows"] or [e["template"]])[0]
+        out = [r for r in out if r.get("scheme_code") != code] + _edited_rows(template, e)
+    blob_store.update_json(fs_edits(fund), lambda s: {**(s or {}), **edits})
+    return out
+
+
+def _store_factsheet_rows(source: str, r: dict, rows: list[dict]) -> dict:
+    """Write a factsheet's (edited) rows to its parsed JSON, the month index and the merge's state."""
+    info = describe(source)
+    codes = list(dict.fromkeys(x["scheme_code"] for x in rows))
+    first = {c: next(x for x in rows if x["scheme_code"] == c) for c in codes}
+    r.update(rows=rows, funds=len(codes), managers=sum(1 for x in rows if x.get("fund_manager")),
+             missing_manager=[first[c]["scheme_name"] for c in codes
+                              if not any(x.get("fund_manager") for x in rows if x["scheme_code"] == c)],
+             missing_aum=[first[c]["scheme_name"] for c in codes if not first[c].get("aum_month_end_cr")],
+             edited=sorted({x["scheme_code"] for x in rows if x.get("aum_check") == "edited"}))
+    blob_store.put_json(blob_store.parsed_path(source), r)
+    _update_index(source, _summary(r))
+    house = sif_house(Path(info["name"]).stem) if info["fund"] == "SIF" else Path(info["name"]).stem
+    key = f"{info['year']}/{info['month']}/{house}"
+    blob_store.update_json(fs_state(info["fund"]), lambda s: {**(s or {}), key: {
+        **((s or {}).get(key) or {"source": source, "exits": r.get("exits") or []}), "rows": rows}})
+    return r
+
+
+def _editable(source: str) -> tuple[dict, dict]:
+    info = describe(source)
+    if info["kind"] != FACTSHEET:
+        raise ValueError("Only factsheet data (AUM and fund managers) can be edited.")
+    idx = (blob_store.get_json(_index_path(source)) or {}).get(source) or {}
+    if idx.get("status") in ("queued", "running"):
+        raise ValueError("This factsheet is being parsed. Edit it when the parse has finished.")
+    r = blob_store.get_json(blob_store.parsed_path(source))
+    if not r or r.get("status") != "done":
+        raise ValueError("This factsheet has no parsed data yet. Parse it first.")
+    return info, r
+
+
+def edit_factsheet(source: str, scheme_code: str, aum_month_end_cr=None, aum_monthly_avg_cr=None,
+                   managers: list[dict] | None = None, scheme_name: str = "", category: str = "",
+                   edited_by: str = "") -> dict:
+    """Set one fund's AUM and fund managers in one parsed factsheet by hand. Returns the factsheet's result.
+    managers: [{"name", "since": YYYY-MM[-DD], "role"}]. A fund the parser did not read is added (scheme_name,
+    category from its portfolio)."""
+    info, r = _editable(source)
+    code = str(scheme_code or "").strip()
+    if not code:
+        raise ValueError("Which fund? scheme_code is missing.")
+    mgrs, seen = [], set()
+    for m in managers or []:
+        name = " ".join(str(m.get("name") or "").split())
+        if not name:
+            continue
+        if name.lower() in seen:
+            raise ValueError(f"{name} is listed twice.")
+        seen.add(name.lower())
+        mgrs.append({"name": name, "since": _since(m.get("since")), "role": str(m.get("role") or "").strip()})
+    rows = r.get("rows") or []
+    key = f"{source}|{code}"
+    old = (blob_store.get_json(fs_edits(info["fund"])) or {}).get(key) or {}
+    parsed = old.get("parsed_rows") if old else [x for x in rows if x.get("scheme_code") == code
+                                                  and x.get("aum_check") != "edited"]
+    template = (parsed or [x for x in rows if x.get("scheme_code") == code] or [None])[0]
+    if template is None:
+        if not scheme_name:
+            raise ValueError(f"{code} is not in this factsheet: give the fund's name and category to add it.")
+        any_row = rows[0] if rows else {}
+        template = {**{c: any_row.get(c, "") for c in ("year", "factsheet_month", "as_on_date", "as_on_source",
+                                                        "portfolio_month", "amc", "fund_house", "factsheet_file")},
+                    "category": category, "scheme_code": code, "scheme_name": scheme_name,
+                    "factsheet_fund_name": scheme_name, "pdf_pages": ""}
+    edit = {"source": source, "scheme_code": code, "scheme_name": template.get("scheme_name") or scheme_name,
+            "aum_month_end_cr": _amount(aum_month_end_cr), "aum_monthly_avg_cr": _amount(aum_monthly_avg_cr),
+            "managers": mgrs, "edited_at": _now(), "edited_by": edited_by,
+            "parsed_rows": parsed or [], "template": template}
+    blob_store.update_json(fs_edits(info["fund"]), lambda s: {**(s or {}), key: edit})
+    rows = [x for x in rows if x.get("scheme_code") != code] + _edited_rows(template, edit)
+    return _store_factsheet_rows(source, r, rows)
+
+
+def revert_factsheet_edit(source: str, scheme_code: str) -> dict:
+    """Undo the hand edit of one fund: back to what the parser read."""
+    info, r = _editable(source)
+    key = f"{source}|{scheme_code}"
+    edit = (blob_store.get_json(fs_edits(info["fund"])) or {}).get(key)
+    if not edit:
+        raise ValueError("This fund has no hand edit.")
+    rows = [x for x in r.get("rows") or [] if x.get("scheme_code") != scheme_code] + (edit.get("parsed_rows") or [])
+    blob_store.update_json(fs_edits(info["fund"]), lambda s: {k: v for k, v in (s or {}).items() if k != key})
+    return _store_factsheet_rows(source, r, rows)
+
+
+def factsheet_edits(source: str) -> dict:
+    """{scheme_code: edit} of one factsheet (without the stored parsed rows)."""
+    fund = describe(source)["fund"]
+    return {v["scheme_code"]: {k: x for k, x in v.items() if k not in ("parsed_rows", "template")}
+            for k, v in (blob_store.get_json(fs_edits(fund)) or {}).items() if k.startswith(source + "|")}
 
 
 # ---------- merged: holdings + fund managers + AUM ----------
